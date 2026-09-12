@@ -1,0 +1,9 @@
+https://$PANEL_DOMAIN {
+    encode
+    reverse_proxy * http://remnawave:$PANEL_PORT
+}
+
+:443 {
+    tls internal
+    respond 204
+}
