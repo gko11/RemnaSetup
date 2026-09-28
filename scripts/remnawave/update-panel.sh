@@ -6,7 +6,7 @@ source "/opt/remnasetup/scripts/common/languages.sh"
 
 update_panel() {
     info "$(get_string update_panel_updating)"
-    cd /opt/remnawave
+    cd /opt/remnawave || exit 1
     docker compose pull
     docker compose down
     docker compose up -d

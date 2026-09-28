@@ -101,7 +101,6 @@ check_remnanode() {
 
 install_remnanode() {
     info "$(get_string "install_node_installing")"
-    chmod -R 777 /opt
     mkdir -p /opt/remnanode
 
     if [ -n "$SUDO_USER" ]; then
@@ -116,7 +115,7 @@ install_remnanode() {
     fi
     
     chown "$REAL_USER:$REAL_USER" /opt/remnanode
-    cd /opt/remnanode
+    cd /opt/remnanode || exit 1
 
     cp "/opt/remnasetup/data/docker/node-compose.yml" docker-compose.yml
 

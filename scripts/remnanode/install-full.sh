@@ -12,6 +12,17 @@ get_string_local() {
             delegating_selfsteal) echo "Installing selfsteal (Docker + Caddy)..." ;;
             delegating_warproxy)  echo "Installing WARP SOCKS5 proxy (Docker)..." ;;
             removing_native_warp) echo "Removing leftover native WARP (wg-quick@warp)..." ;;
+            selfsteal_found)      echo "Selfsteal (Docker + Caddy) is already installed" ;;
+            warp_found)           echo "WARP SOCKS5 (Docker) is already installed — the installer will ask whether to keep the account or re-register" ;;
+            native_warp_found)    echo "Native WARP (wg-quick@warp) found — it will be replaced by WARP SOCKS5 (Docker)" ;;
+            warp_failed)          echo "WARP was not set up — see the messages above. The rest of the installation continues." ;;
+            sum_status)           echo "Status:" ;;
+            sum_logs)             echo "Logs:" ;;
+            sum_check)            echo "Exit check:" ;;
+            sum_restart)          echo "Restart:" ;;
+            sum_account)          echo "WARP account:" ;;
+            sum_dont_delete)      echo "DO NOT delete!" ;;
+            sum_tiktok)           echo "Xray snippet for TikTok:" ;;
             *) echo "$key" ;;
         esac
     else
@@ -19,6 +30,17 @@ get_string_local() {
             delegating_selfsteal) echo "Устанавливаю selfsteal (Docker + Caddy)..." ;;
             delegating_warproxy)  echo "Устанавливаю WARP SOCKS5 прокси (Docker)..." ;;
             removing_native_warp) echo "Удаляю остатки нативного WARP (wg-quick@warp)..." ;;
+            selfsteal_found)      echo "Selfsteal (Docker + Caddy) уже установлен" ;;
+            warp_found)           echo "WARP SOCKS5 (Docker) уже установлен — установщик спросит, сохранить аккаунт или перерегистрировать" ;;
+            native_warp_found)    echo "Найден нативный WARP (wg-quick@warp) — он будет заменён на WARP SOCKS5 (Docker)" ;;
+            warp_failed)          echo "WARP не настроен — см. сообщения выше. Остальная установка продолжается." ;;
+            sum_status)           echo "Статус:" ;;
+            sum_logs)             echo "Логи:" ;;
+            sum_check)            echo "Проверка выхода:" ;;
+            sum_restart)          echo "Перезапуск:" ;;
+            sum_account)          echo "Аккаунт WARP:" ;;
+            sum_dont_delete)      echo "НЕ удалять!" ;;
+            sum_tiktok)           echo "Сниппет Xray для TikTok:" ;;
             *) echo "$key" ;;
         esac
     fi
@@ -29,6 +51,42 @@ check_docker() {
         return 0
     else
         return 1
+    fi
+}
+
+selfsteal_installed() {
+    [ -f /opt/selfsteal/docker-compose.yml ] || \
+        docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx selfsteal
+}
+
+warproxy_installed() {
+    [ -f /opt/warproxy/docker-compose.yml ] || [ -s /opt/warproxy/config/wgcf-account.toml ] || \
+        docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx warproxy
+}
+
+native_warp_installed() {
+    [ -f /etc/wireguard/warp.conf ] || \
+        systemctl is-enabled wg-quick@warp >/dev/null 2>&1 || \
+        systemctl is-active wg-quick@warp >/dev/null 2>&1
+}
+
+stop_caddy_if_running() {
+    # системный Caddy (старые версии скрипта)
+    if command -v caddy >/dev/null 2>&1 && systemctl is-active --quiet caddy 2>/dev/null; then
+        warn "$(get_string "install_nginx_node_caddy_detected")"
+        systemctl stop caddy 2>/dev/null || true
+        systemctl disable caddy 2>/dev/null || true
+        success "$(get_string "install_nginx_node_caddy_stopped")"
+    fi
+    # Docker-selfsteal этой сборки: останавливаем без down -v, сертификаты в volume остаются
+    if [ -f /opt/selfsteal/docker-compose.yml ] || docker ps --format '{{.Names}}' 2>/dev/null | grep -qx selfsteal; then
+        warn "$(get_string "install_nginx_node_caddy_detected")"
+        if [ -f /opt/selfsteal/docker-compose.yml ]; then
+            (cd /opt/selfsteal && docker compose stop) >/dev/null 2>&1 || true
+            (cd /opt/selfsteal && docker compose rm -f) >/dev/null 2>&1 || true
+        fi
+        docker rm -f selfsteal >/dev/null 2>&1 || true
+        success "$(get_string "install_nginx_node_caddy_stopped")"
     fi
 }
 
@@ -71,8 +129,12 @@ check_components() {
         fi
     fi
 
-    if command -v caddy >/dev/null 2>&1; then
-        info "$(get_string "install_full_node_caddy_installed")"
+    if selfsteal_installed || command -v caddy >/dev/null 2>&1; then
+        if selfsteal_installed; then
+            info "$(get_string_local "selfsteal_found")"
+        else
+            info "$(get_string "install_full_node_caddy_installed")"
+        fi
         DETECTED_WEBSERVER="caddy"
         if [[ "$SKIP_WEBSERVER" == "true" ]]; then
             info "SKIP_WEBSERVER=true, skipping..."
@@ -131,38 +193,15 @@ check_components() {
         fi
     fi
 
-    if command -v wgcf >/dev/null 2>&1 && [ -f "/etc/wireguard/warp.conf" ]; then
-        info "$(get_string "warp_native_already_installed")"
-        if [[ "$SKIP_WARP" == "true" ]]; then
-            info "SKIP_WARP=true, skipping..."
-        elif [[ "$INSTALL_WARP" == "n" || "$INSTALL_WARP" == "N" ]]; then
-            SKIP_WARP=true
-            info "INSTALL_WARP=$INSTALL_WARP, skipping..."
-        elif [[ "$INSTALL_WARP" == "y" || "$INSTALL_WARP" == "Y" ]]; then
-            SKIP_WARP=true
-            info "WARP already installed, skipping..."
-        elif [[ "$SKIP_WARP" == "false" ]]; then
-            :
-        else
-            while true; do
-                question "$(get_string "warp_native_reconfigure")"
-                RECONFIGURE="$REPLY"
-                if [[ "$RECONFIGURE" == "y" || "$RECONFIGURE" == "Y" ]]; then
-                    SKIP_WARP=false
-                    break
-                elif [[ "$RECONFIGURE" == "n" || "$RECONFIGURE" == "N" ]]; then
-                    SKIP_WARP=true
-                    info "$(get_string "warp_native_skip_installation")"
-                    break
-                else
-                    warn "$(get_string "warp_native_please_enter_yn")"
-                fi
-            done
-        fi
-    else
-        if [[ -z "$SKIP_WARP" ]]; then
-            SKIP_WARP=false
-        fi
+    # WARP: режим (сохранить аккаунт / перерегистрировать) спрашивает сам install-warp.sh
+    if native_warp_installed; then
+        info "$(get_string_local "native_warp_found")"
+    fi
+    if warproxy_installed; then
+        info "$(get_string_local "warp_found")"
+    fi
+    if [[ -z "$SKIP_WARP" ]]; then
+        SKIP_WARP=false
     fi
 
     if sysctl net.ipv4.tcp_congestion_control | grep -q bbr; then
@@ -400,24 +439,38 @@ uninstall_warp_native() {
     # Нативный WARP (wgcf + wg-quick@warp) в этой сборке не ставится.
     # Если он остался от прежней установки — аккуратно убираем, чтобы не
     # конфликтовал с контейнерным WARP по маршрутам и DNS.
-    if systemctl list-unit-files 2>/dev/null | grep -q 'wg-quick@warp'; then
+    # (проверка через list-unit-files не работала: там виден только шаблон wg-quick@.service)
+    if native_warp_installed; then
         warn "$(get_string_local "removing_native_warp")"
         systemctl stop wg-quick@warp 2>/dev/null || true
         systemctl disable wg-quick@warp 2>/dev/null || true
-        rm -f /etc/wireguard/warp.conf
+        [ -f /etc/wireguard/warp.conf ] && mv -f /etc/wireguard/warp.conf "/etc/wireguard/warp.conf.bak.$(date +%s)"
+        # watchdog от WARP-NATIVE иначе поднимет интерфейс обратно
+        rm -f /etc/cron.d/warp-native
+        rm -rf /opt/warp-native
     fi
 }
 
 install_warp() {
     # WARP-NATIVE вырезан. Вместо него — WARP через Docker-контейнер с SOCKS5,
     # который Xray использует как outbound (socks 172.17.0.1:1080).
+    # Не форсируем NON_INTERACTIVE и адрес/порт: при повторной установке скрипт
+    # сам возьмёт прежние значения из compose и спросит режим (keep/reregister).
+    # Без терминала режим всегда keep — автоматика не перерегистрирует аккаунт.
     info "$(get_string_local "delegating_warproxy")"
-    BIND_ADDR="${WARP_BIND_ADDR:-172.17.0.1}" \
-    SOCKS_PORT="${WARP_SOCKS_PORT:-1080}" \
+    BIND_ADDR="${WARP_BIND_ADDR:-}" \
+    SOCKS_PORT="${WARP_SOCKS_PORT:-}" \
     TZ_VAL="${TZ_VAL:-Europe/Moscow}" \
-    NON_INTERACTIVE="${NON_INTERACTIVE:-true}" \
-    REINSTALL_CONFIRM="${RECONFIGURE:-yes}" \
+    NON_INTERACTIVE="${NON_INTERACTIVE:-}" \
+    WARP_MODE="${WARP_MODE:-}" \
+    WARP_ACCOUNT_FILE="${WARP_ACCOUNT_FILE:-}" \
+    WARP_ENDPOINT="${WARP_ENDPOINT:-}" \
+    SKIP_PAUSE=true \
     bash /opt/remnasetup/scripts/remnanode/install-warp.sh
+    WARP_RESULT=$?
+    if [ "$WARP_RESULT" -ne 0 ]; then
+        warn "$(get_string_local "warp_failed")"
+    fi
 }
 
 install_bbr() {
@@ -476,12 +529,7 @@ install_caddy() {
 install_nginx_selfsteal() {
     info "$(get_string "install_full_node_installing_nginx")"
 
-    if command -v caddy >/dev/null 2>&1; then
-        warn "$(get_string "install_nginx_node_caddy_detected")"
-        systemctl stop caddy 2>/dev/null || true
-        systemctl disable caddy 2>/dev/null || true
-        success "$(get_string "install_nginx_node_caddy_stopped")"
-    fi
+    stop_caddy_if_running
 
     apt-get install -y nginx certbot
 
@@ -700,7 +748,6 @@ EOL
 
 install_remnanode() {
     info "$(get_string "install_full_node_installing_remnanode")"
-    chmod -R 777 /opt
     mkdir -p /opt/remnanode
 
     if [ -n "$SUDO_USER" ]; then
@@ -715,7 +762,7 @@ install_remnanode() {
     fi
     
     chown "$REAL_USER:$REAL_USER" /opt/remnanode
-    cd /opt/remnanode
+    cd /opt/remnanode || exit 1
 
     info "$(get_string "install_full_node_using_standard_compose")"
     cp "/opt/remnasetup/data/docker/node-compose.yml" docker-compose.yml
@@ -750,7 +797,7 @@ main() {
     fi
 
     if [[ "$SKIP_WARP" != "true" ]]; then
-        if command -v wgcf >/dev/null 2>&1 && [ -f "/etc/wireguard/warp.conf" ]; then
+        if native_warp_installed; then
             uninstall_warp_native
             echo ""
         fi
@@ -762,13 +809,19 @@ main() {
     fi
     
     if [[ "$SKIP_WEBSERVER" != "true" ]]; then
-        if [[ "$WEBSERVER" == "caddy" ]]; then
-            if [[ "$UPDATE_CADDY" == "true" ]]; then
-                systemctl stop caddy
-                rm -f /etc/caddy/Caddyfile
+        if [[ "$WEBSERVER" == "caddy" && "$SKIP_CADDY" != "true" ]]; then
+            # системный Caddy от старых версий держал бы те же порты, что и Docker-Caddy
+            if systemctl list-unit-files caddy.service >/dev/null 2>&1 && systemctl is-active --quiet caddy 2>/dev/null; then
+                systemctl stop caddy 2>/dev/null || true
+                systemctl disable caddy 2>/dev/null || true
+            fi
+            # nginx-selfsteal на тех же портах мешал бы контейнеру
+            if systemctl is-active --quiet nginx 2>/dev/null && [ -f /etc/nginx/conf.d/selfsteal.conf ]; then
+                systemctl stop nginx 2>/dev/null || true
+                systemctl disable nginx 2>/dev/null || true
             fi
             install_caddy
-        elif [[ "$WEBSERVER" == "nginx" ]]; then
+        elif [[ "$WEBSERVER" == "nginx" && "$SKIP_NGINX" != "true" ]]; then
             if [[ "$UPDATE_NGINX" == "true" ]]; then
                 systemctl stop nginx 2>/dev/null || true
                 rm -f /etc/nginx/conf.d/selfsteal.conf
@@ -781,7 +834,7 @@ main() {
     
     if [[ "$SKIP_REMNANODE" != "true" ]]; then
         if [[ "$UPDATE_REMNANODE" == "true" ]]; then
-            cd /opt/remnanode
+            cd /opt/remnanode || exit 1
             docker compose down
             rm -f docker-compose.yml
             rm -f .env
@@ -804,16 +857,22 @@ main() {
         fi
     fi
 
-    if [[ "$SKIP_WARP" != "true" ]]; then
+    if [[ "$SKIP_WARP" != "true" && -f /opt/warproxy/docker-compose.yml ]]; then
+        local warp_line warp_addr warp_port
+        warp_line=$(grep -oE '"[0-9.]+:[0-9]+:1080"' /opt/warproxy/docker-compose.yml 2>/dev/null | head -1 | tr -d '"')
+        warp_addr="${warp_line%%:*}"
+        warp_port=$(echo "$warp_line" | cut -d: -f2)
+        [ "$warp_addr" = "0.0.0.0" ] && warp_addr="127.0.0.1"
         echo ""
-        echo -e "${BOLD_CYAN}➤ Статус:${RESET}          docker ps --filter name=warproxy"
-        echo -e "${BOLD_CYAN}➤ Логи:${RESET}            docker logs warproxy --tail 60"
-        echo -e "${BOLD_CYAN}➤ Проверка выхода:${RESET} curl -s --socks5 172.17.0.1:1080 https://api.ipify.org"
-        echo -e "${BOLD_CYAN}➤ Перезапуск:${RESET}      cd /opt/warproxy && docker compose restart"
-        echo -e "${BOLD_YELLOW}➤ Аккаунт WARP:${RESET}    /opt/warproxy/config/wgcf-account.toml — НЕ удалять!"
+        echo -e "${BOLD_CYAN}➤ $(get_string_local "sum_status")${RESET}  docker ps --filter name=warproxy"
+        echo -e "${BOLD_CYAN}➤ $(get_string_local "sum_logs")${RESET}  docker logs warproxy --tail 60"
+        echo -e "${BOLD_CYAN}➤ $(get_string_local "sum_check")${RESET}  curl -s -x socks5h://${warp_addr:-172.17.0.1}:${warp_port:-1080} https://www.cloudflare.com/cdn-cgi/trace | grep -E '^(ip|warp)='"
+        echo -e "${BOLD_CYAN}➤ $(get_string_local "sum_restart")${RESET}  cd /opt/warproxy && docker compose restart"
+        echo -e "${BOLD_CYAN}➤ $(get_string_local "sum_tiktok")${RESET}  /opt/warproxy/xray-warp-tiktok.json"
+        echo -e "${BOLD_YELLOW}➤ $(get_string_local "sum_account")${RESET}  /opt/warproxy/config/wgcf-account.toml — $(get_string_local "sum_dont_delete")"
         echo ""
     fi
-    
+
     pause_press_key "$(get_string "install_full_node_press_key")"
     exit 0
 }

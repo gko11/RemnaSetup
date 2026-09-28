@@ -100,7 +100,7 @@ install_components() {
     if [ "$REINSTALL_PANEL" = true ]; then
         info "$(get_string "install_full_installing")"
         mkdir -p /opt/remnawave
-        cd /opt/remnawave
+        cd /opt/remnawave || exit 1
 
         cp "/opt/remnasetup/data/docker/panel.env" .env
         cp "/opt/remnasetup/data/docker/panel-compose.yml" docker-compose.yml
@@ -133,7 +133,7 @@ install_components() {
     if [ "$REINSTALL_CADDY" = true ]; then
         info "$(get_string "install_full_installing_caddy")"
         mkdir -p /opt/remnawave/caddy
-        cd /opt/remnawave/caddy
+        cd /opt/remnawave/caddy || exit 1
 
         cp "/opt/remnasetup/data/caddy/caddyfile" Caddyfile
         cp "/opt/remnasetup/data/docker/caddy-compose.yml" docker-compose.yml

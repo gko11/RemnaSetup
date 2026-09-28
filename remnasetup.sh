@@ -48,14 +48,14 @@ print_header() {
         echo -e "${GREEN}RemnaSetup by gko11${RESET}"
         echo -e "${CYAN}Project: https://github.com/gko11/RemnaSetup${RESET}"
         echo -e "${YELLOW}Selfsteal: Docker + Caddy   |   WARP: Docker SOCKS5${RESET}"
-        echo -e "${CYAN}Version: 2.5-gko11${RESET}"
+        echo -e "${CYAN}Version: 2.6-gko11${RESET}"
         echo
         echo -e "${MAGENTA}────────────────────────────────────────────────────────────${RESET}"
     else
         echo -e "${GREEN}RemnaSetup by gko11${RESET}"
         echo -e "${CYAN}Проект: https://github.com/gko11/RemnaSetup${RESET}"
         echo -e "${YELLOW}Selfsteal: Docker + Caddy   |   WARP: Docker SOCKS5${RESET}"
-        echo -e "${CYAN}Версия: 2.5-gko11${RESET}"
+        echo -e "${CYAN}Версия: 2.6-gko11${RESET}"
         echo
         echo -e "${MAGENTA}────────────────────────────────────────────────────────────${RESET}"
     fi
@@ -129,12 +129,12 @@ display_backup_menu() {
         echo -e "${BLUE}1. Create Remnawave backup${RESET}"
         echo -e "${BLUE}2. Restore from Remnawave backup${RESET}"
         echo -e "${BLUE}3. Configure automatic backup${RESET}"
-        echo -e "${RED}0. Exit${RESET}"
+        echo -e "${RED}0. Back${RESET}"
     else
         echo -e "${BLUE}1. Создать резервную копию Remnawave${RESET}"
         echo -e "${BLUE}2. Восстановить из резервной копии Remnawave${RESET}"
         echo -e "${BLUE}3. Настроить автоматическое резервное копирование${RESET}"
-        echo -e "${RED}0. Выход${RESET}"
+        echo -e "${RED}0. Назад${RESET}"
     fi
     echo
     read -p "$(echo -e "${BOLD_CYAN}$(get_string "select_option"):${RESET}") " BACKUP_OPTION

@@ -6,7 +6,7 @@ source "/opt/remnasetup/scripts/common/languages.sh"
 
 update_subscription() {
     info "$(get_string update_subscription_updating)"
-    cd /opt/remnawave/subscription
+    cd /opt/remnawave/subscription || exit 1
     docker compose pull
     docker compose down
     docker compose up -d

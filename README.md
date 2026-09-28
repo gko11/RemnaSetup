@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/gko11/RemnaSetup/refs/heads/main/in
 - Веб-сервер на выбор: **Caddy** или **Nginx** с self-steal
 - Nginx: поддержка proxy protocol, сертификаты через Cloudflare DNS-01 / HTTP-01 / Gcore DNS-01
 - Управление IPv6
-- WARP-NATIVE (by distillium)
+- WARP SOCKS5 прокси (Docker) — регистрация через wgcf ≥ 2.3.0, без перерегистраций, готовый роутинг TikTok → WARP
 - BBR оптимизация
 
 ---
@@ -103,7 +103,7 @@ sudo -E bash /opt/remnasetup/remnasetup.sh install-node
 | `install-caddy-node` | Только Caddy |
 | `install-nginx-node` | Только Nginx |
 | `install-bbr` | Только BBR |
-| `install-warp` | Только WARP |
+| `install-warp` | Только WARP SOCKS5 (Docker) |
 | `update-node` | Обновить Remnanode |
 
 ### Переменные окружения
@@ -126,6 +126,11 @@ sudo -E bash /opt/remnasetup/remnasetup.sh install-node
 | `SKIP_WEBSERVER` | `true` — пропустить веб-сервер | — |
 | `SKIP_REMNANODE` | `true` — пропустить ноду | — |
 | `SKIP_WARP` | `true` — пропустить WARP | — |
+| `WARP_MODE` | `keep` — переустановить с сохранением аккаунта / `reregister` — новая регистрация / `cancel` | `keep` |
+| `WARP_ACCOUNT_FILE` | путь к готовому `wgcf-account.toml` для импорта | — |
+| `WARP_ENDPOINT` | свой endpoint WARP, напр. `162.159.192.1:2408` | — |
+| `WARP_BIND_ADDR` / `BIND_ADDR` | адрес SOCKS5 на хосте | `172.17.0.1` |
+| `WARP_SOCKS_PORT` / `SOCKS_PORT` | порт SOCKS5 | `1080` |
 | `SKIP_BBR` | `true` — пропустить BBR | — |
 | `UPDATE_REMNANODE` | `true` — переустановить ноду | — |
 | `UPDATE_CADDY` | `true` — переустановить Caddy | — |

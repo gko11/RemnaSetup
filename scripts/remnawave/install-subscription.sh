@@ -50,7 +50,7 @@ install_caddy_for_subscription() {
         fi
         
         mkdir -p /opt/remnawave/caddy
-        cd /opt/remnawave/caddy
+        cd /opt/remnawave/caddy || exit 1
 
         cat > Caddyfile << EOF
 https://$SUB_DOMAIN {
@@ -120,7 +120,7 @@ update_caddyfile_with_subscription() {
         mv "$temp_file" "$caddyfile_path"
     fi
 
-    cd /opt/remnawave/caddy
+    cd /opt/remnawave/caddy || exit 1
     docker compose restart 2>/dev/null || docker compose up -d
 }
 
@@ -129,7 +129,7 @@ install_subscription() {
     if [ "$REINSTALL_SUBSCRIPTION" = true ]; then
         info "$(get_string install_subscription_installing)"
         mkdir -p /opt/remnawave/subscription
-        cd /opt/remnawave/subscription
+        cd /opt/remnawave/subscription || exit 1
 
         cp "/opt/remnasetup/data/docker/subscription.env" .env
         cp "/opt/remnasetup/data/docker/subscription-compose.yml" docker-compose.yml
@@ -141,14 +141,16 @@ install_subscription() {
         sed -i "s|\$SUB_PORT|$SUB_PORT|g" docker-compose.yml
 
         if [ "$INSTALL_WITH_PANEL" = true ]; then
-            cd /opt/remnawave
+            cd /opt/remnawave || exit 1
             if [ -f ".env" ]; then
                 sed -i "s|SUB_DOMAIN=.*|SUB_DOMAIN=$SUB_DOMAIN|g" .env
             fi
 
             update_caddyfile_with_subscription
 
-            docker compose down && docker compose up -d 2>/dev/null || true
+            # update_caddyfile_with_subscription делает cd в caddy/ — панель
+            # перезапускаем явно из её каталога, иначе SUB_DOMAIN не подхватится
+            (cd /opt/remnawave && docker compose down && docker compose up -d) 2>/dev/null || true
         else
             sed -i '/networks:/d' docker-compose.yml
             sed -i '/- remnawave-network/d' docker-compose.yml
@@ -157,7 +159,7 @@ install_subscription() {
             install_caddy_for_subscription
         fi
 
-        cd /opt/remnawave/subscription
+        cd /opt/remnawave/subscription || exit 1
         docker compose down && docker compose up -d
     fi
 }

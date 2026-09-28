@@ -59,7 +59,7 @@ install_panel() {
     if [ "$REINSTALL_PANEL" = true ]; then
         info "$(get_string "install_panel_installing")"
         mkdir -p /opt/remnawave
-        cd /opt/remnawave
+        cd /opt/remnawave || exit 1
 
         cp "/opt/remnasetup/data/docker/panel.env" .env
         cp "/opt/remnasetup/data/docker/panel-compose.yml" docker-compose.yml

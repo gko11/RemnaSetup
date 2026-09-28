@@ -110,7 +110,7 @@ update_package_list() {
 
 install_packages() {
     local pm=$(detect_package_manager)
-    local packages="$@"
+    local packages="$*"
     
     case "$pm" in
         apt)

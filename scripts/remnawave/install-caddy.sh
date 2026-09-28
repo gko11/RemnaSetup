@@ -48,7 +48,7 @@ install_caddy() {
     if [ "$REINSTALL_CADDY" = true ]; then
         info "$(get_string "install_caddy_installing")"
         mkdir -p /opt/remnawave/caddy
-        cd /opt/remnawave/caddy
+        cd /opt/remnawave/caddy || exit 1
 
         cp "/opt/remnasetup/data/caddy/caddyfile" Caddyfile
         cp "/opt/remnasetup/data/docker/caddy-compose.yml" docker-compose.yml

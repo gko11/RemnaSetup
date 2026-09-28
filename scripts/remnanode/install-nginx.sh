@@ -43,10 +43,21 @@ check_nginx() {
 }
 
 stop_caddy_if_running() {
-    if command -v caddy >/dev/null 2>&1; then
+    # системный Caddy (старые версии скрипта)
+    if command -v caddy >/dev/null 2>&1 && systemctl is-active --quiet caddy 2>/dev/null; then
         warn "$(get_string "install_nginx_node_caddy_detected")"
         systemctl stop caddy 2>/dev/null || true
         systemctl disable caddy 2>/dev/null || true
+        success "$(get_string "install_nginx_node_caddy_stopped")"
+    fi
+    # Docker-selfsteal этой сборки: останавливаем без down -v, сертификаты в volume остаются
+    if [ -f /opt/selfsteal/docker-compose.yml ] || docker ps --format '{{.Names}}' 2>/dev/null | grep -qx selfsteal; then
+        warn "$(get_string "install_nginx_node_caddy_detected")"
+        if [ -f /opt/selfsteal/docker-compose.yml ]; then
+            (cd /opt/selfsteal && docker compose stop) >/dev/null 2>&1 || true
+            (cd /opt/selfsteal && docker compose rm -f) >/dev/null 2>&1 || true
+        fi
+        docker rm -f selfsteal >/dev/null 2>&1 || true
         success "$(get_string "install_nginx_node_caddy_stopped")"
     fi
 }
