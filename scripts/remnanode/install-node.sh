@@ -122,6 +122,11 @@ install_remnanode() {
     sed -i "s|\$NODE_PORT|$NODE_PORT|g" docker-compose.yml
     sed -i "s|\$SECRET_KEY|$SECRET_KEY|g" docker-compose.yml
 
+    # Лимит памяти: половина RAM хоста, но не меньше 512 МБ и не больше 4 ГБ.
+    # Ноде этого хватает с большим запасом — в работе xray держит 300-500 МБ.
+    info "$(get_string "mem_limits_header" "$(host_ram_mb)")"
+    set_container_limits docker-compose.yml NODE 50 512 4096
+
     docker compose up -d || {
         error "$(get_string "install_node_error")"
         exit 1

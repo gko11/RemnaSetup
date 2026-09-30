@@ -83,6 +83,13 @@ install_panel() {
 
         sed -i "s|\$PANEL_PORT|$PANEL_PORT|g" docker-compose.yml
 
+        # Лимиты памяти считаются от RAM хоста. Суммарно берём около 65%,
+        # остальное остаётся ядру, docker и всему, что крутится рядом.
+        info "$(get_string "mem_limits_header" "$(host_ram_mb)")"
+        set_container_limits docker-compose.yml PANEL 30 512 4096
+        set_container_limits docker-compose.yml DB    25 512 4096
+        set_container_limits docker-compose.yml REDIS 10 128  512
+
         docker compose up -d
     fi
 }

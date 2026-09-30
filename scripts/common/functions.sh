@@ -196,3 +196,70 @@ export -f install_packages
 export -f ensure_package
 export -f is_non_interactive
 export -f pause_press_key
+
+# ---------------------------------------------------------------------------
+# Лимиты памяти для контейнеров
+#
+# Зачем это нужно. Утечка в одном контейнере способна съесть всю RAM хоста,
+# выдавить систему в своп и положить ноду целиком — вместе с теми сервисами,
+# которые ни в чём не виноваты. Показательный случай: wireproxy внутри
+# warproxy набирает по гигабайту в час и за ночь забивает 8 ГБ.
+#
+# С лимитом ядро убивает только виновника, "restart: always" поднимает его
+# обратно за пару секунд, остальные контейнеры ничего не замечают.
+# ---------------------------------------------------------------------------
+
+host_ram_mb() {
+    local kb
+    kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null)
+    if [ -z "$kb" ]; then
+        echo 2048
+        return
+    fi
+    echo $(( kb / 1024 ))
+}
+
+# mem_limit_mb <процент_от_RAM> <минимум_МБ> <максимум_МБ> -> "512m"
+mem_limit_mb() {
+    local pct="$1" min="$2" max="$3" total value
+    total=$(host_ram_mb)
+    value=$(( total * pct / 100 ))
+    [ "$value" -lt "$min" ] && value="$min"
+    [ "$value" -gt "$max" ] && value="$max"
+    # на совсем маленьких VPS минимум может оказаться больше самой памяти
+    [ "$value" -gt "$total" ] && value="$total"
+    echo "${value}m"
+}
+
+# Ограничение свопа поддерживается не везде: на cgroup v1 без swapaccount=1
+# Docker молча игнорирует memswap_limit и печатает предупреждение при старте.
+swap_accounting_available() {
+    [ -f /sys/fs/cgroup/memory.swap.max ] && return 0
+    [ -f /sys/fs/cgroup/memory/memory.memsw.limit_in_bytes ]
+}
+
+# set_container_limits <compose-файл> <ИМЯ_ПЛЕЙСХОЛДЕРА> <процент> <мин_МБ> <макс_МБ>
+#
+# Подставляет $MEM_<ИМЯ> и $MEMSWAP_<ИМЯ>. Если ядро не умеет считать своп,
+# строка memswap_limit из файла удаляется — иначе Docker ругается на каждый
+# запуск. memswap_limit, равный mem_limit, запрещает контейнеру уползать
+# в своп: лучше быстрый OOM с перезапуском, чем часы свопинга.
+set_container_limits() {
+    local file="$1" name="$2" pct="$3" min="$4" max="$5"
+    local mem swap
+
+    [ -f "$file" ] || return 0
+
+    mem=$(mem_limit_mb "$pct" "$min" "$max")
+    sed -i "s|[\$]MEM_${name}|${mem}|g" "$file"
+
+    if swap_accounting_available; then
+        sed -i "s|[\$]MEMSWAP_${name}|${mem}|g" "$file"
+        swap="$mem"
+    else
+        sed -i "/[\$]MEMSWAP_${name}/d" "$file"
+        swap="-"
+    fi
+
+    info "$(get_string "mem_limit_applied" "$name" "$mem" "$swap")"
+}

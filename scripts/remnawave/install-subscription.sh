@@ -71,14 +71,23 @@ services:
         container_name: 'caddy'
         restart: always
         network_mode: host
+        mem_limit: $MEM_CADDY
+        memswap_limit: $MEMSWAP_CADDY
         volumes:
             - ./Caddyfile:/etc/caddy/Caddyfile
             - caddy-ssl-data:/data
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
 
 volumes:
     caddy-ssl-data:
 COMPOSE
-        
+
+        set_container_limits docker-compose.yml CADDY 5 128 512
+
         docker compose up -d
     else
         update_caddyfile_with_subscription
@@ -139,6 +148,9 @@ install_subscription() {
         sed -i "s|\$API_TOKEN|$API_TOKEN|g" .env
 
         sed -i "s|\$SUB_PORT|$SUB_PORT|g" docker-compose.yml
+
+        info "$(get_string "mem_limits_header" "$(host_ram_mb)")"
+        set_container_limits docker-compose.yml SUB 10 128 512
 
         if [ "$INSTALL_WITH_PANEL" = true ]; then
             cd /opt/remnawave || exit 1

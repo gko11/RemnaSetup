@@ -66,6 +66,8 @@ install_caddy() {
             sed -i "s|\$SUB_PORT|$SUB_PORT|g" Caddyfile
         fi
 
+        set_container_limits docker-compose.yml CADDY 5 128 512
+
         cd /opt/remnawave/caddy && docker compose up -d
     fi
 }

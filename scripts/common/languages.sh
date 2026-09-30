@@ -1092,6 +1092,12 @@ LANG_STRINGS["ru_ipv6_disable_confirm"]="Хотите отключить IPv6? (
 LANG_STRINGS["ru_ipv6_enable_confirm"]="Хотите включить IPv6? (y/n):"
 LANG_STRINGS["ru_ipv6_operation_cancelled"]="Операция отменена"
 
+# --- лимиты ресурсов контейнеров ---
+LANG_STRINGS["en_mem_limit_applied"]="Memory limit %s: %s (swap: %s)"
+LANG_STRINGS["ru_mem_limit_applied"]="Лимит памяти %s: %s (своп: %s)"
+LANG_STRINGS["en_mem_limits_header"]="Applying container memory limits (host RAM: %s MB)"
+LANG_STRINGS["ru_mem_limits_header"]="Ставлю лимиты памяти контейнерам (RAM хоста: %s МБ)"
+
 get_string() {
     local key="$1"
     local lang_key="${LANGUAGE}_${key}"

@@ -31,6 +31,8 @@
 #   WARP_ACCOUNT_FILE=/path/wgcf-account.toml   импорт готового аккаунта
 #   WARP_ENDPOINT=162.159.192.1:2408   свой endpoint (если UDP к engage.* режется)
 #   BIND_ADDR, SOCKS_PORT, TZ_VAL, WGCF_VERSION, WARP_REG_ATTEMPTS
+#   WARP_MEM_LIMIT=1g                 лимит памяти контейнера (default: 15% RAM,
+#                                     но не меньше 256m и не больше 1g)
 #   REINSTALL_CONFIRM=y — устаревший флаг, трактуется как WARP_MODE=keep
 #
 
@@ -67,6 +69,7 @@ t() {
         case "$key" in
             hdr)             echo "WARP SOCKS5 proxy (Docker) — installation" ;;
             found)           echo "Existing installation detected" ;;
+            mem_limited)     echo "Container memory limit" ;;
             acc_state_ok)    echo "WARP account: present" ;;
             acc_state_none)  echo "WARP account: none" ;;
             mode_title)      echo "What should be done?" ;;
@@ -148,6 +151,7 @@ t() {
         case "$key" in
             hdr)             echo "WARP SOCKS5 прокси (Docker) — установка" ;;
             found)           echo "Обнаружена существующая установка" ;;
+            mem_limited)     echo "Лимит памяти контейнера" ;;
             acc_state_ok)    echo "Аккаунт WARP: есть" ;;
             acc_state_none)  echo "Аккаунт WARP: нет" ;;
             mode_title)      echo "Что делаем?" ;;
@@ -564,12 +568,38 @@ write_compose() {
         # свежий wgcf внутрь контейнера: старый из образа не проходит проверку Cloudflare
         vol_wgcf=$'\n      - ./bin/wgcf:/usr/local/bin/wgcf:ro'
     fi
+
+    # wireproxy течёт: на боевой ноде набирал по гигабайту в час и за ночь
+    # съедал 8 ГБ, выдавливая систему в своп. Лимит превращает это из
+    # "легла вся нода" в "контейнер перезапустился за две секунды".
+    # В норме wireproxy живёт в пределах сотни мегабайт, гигабайта хватает.
+    local mem_limit swap_line="" go_limit
+    if declare -F mem_limit_mb >/dev/null; then
+        mem_limit="${WARP_MEM_LIMIT:-$(mem_limit_mb 15 256 1024)}"
+    else
+        # functions.sh устарел — не оставляем compose без лимита вовсе
+        mem_limit="${WARP_MEM_LIMIT:-1024m}"
+        warn "mem_limit_mb() недоступна, беру значение по умолчанию: ${mem_limit}"
+    fi
+    [ -n "$mem_limit" ] || mem_limit="1024m"
+
+    # Мягкий потолок для сборщика мусора Go: ставим ниже жёсткого лимита,
+    # чтобы GC начинал работать раньше, чем ядро дойдёт до OOM. Если рост
+    # памяти — накопленный мусор, а не утечка, до убийства не дойдёт вовсе.
+    go_limit=$(( ${mem_limit%m} * 80 / 100 ))
+
+    if declare -F swap_accounting_available >/dev/null && swap_accounting_available; then
+        # равный mem_limit запрещает уползание в своп: лучше быстрый OOM
+        swap_line=$'\n    memswap_limit: '"${mem_limit}"
+    fi
+
     cat > "${INSTALL_DIR}/docker-compose.yml" <<EOF
 services:
   warproxy:
     image: ${IMAGE}
     container_name: ${CONTAINER}
     restart: always
+    mem_limit: ${mem_limit}${swap_line}
     ports:
       - "${BIND_ADDR}:${SOCKS_PORT}:1080"
     environment:
@@ -577,6 +607,8 @@ services:
       - WARP_PLUS=false
       - SOCKS5_PORT=1080
       - TZ=${TZ_VAL}
+      - GOMEMLIMIT=${go_limit}MiB
+      - GOGC=50
     # Аккаунт WARP живёт здесь. Без этого volume он теряется при каждом
     # пересоздании контейнера и начинается повторная регистрация.
     volumes:
@@ -592,6 +624,7 @@ services:
         max-size: "10m"
         max-file: "3"
 EOF
+    info "$(t mem_limited): ${mem_limit}${swap_line:+ (swap: ${mem_limit})}"
 }
 
 write_xray_snippet() {

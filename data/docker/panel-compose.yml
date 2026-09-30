@@ -23,6 +23,9 @@ services:
     container_name: remnawave
     hostname: remnawave
     <<: [*common, *logging, *env]
+    # Лимиты подставляет установщик от объёма RAM хоста.
+    mem_limit: $MEM_PANEL
+    memswap_limit: $MEMSWAP_PANEL
     volumes:
       - valkey-socket:/var/run/valkey
     ports:
@@ -46,6 +49,9 @@ services:
     hostname: remnawave-db
     shm_size: 512mb
     <<: [*common, *logging, *env]
+    # memswap намеренно не ограничен: базе лучше уйти в своп на пике,
+    # чем получить OOM посреди транзакции.
+    mem_limit: $MEM_DB
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -66,6 +72,8 @@ services:
     container_name: remnawave-redis
     hostname: remnawave-redis
     <<: [*common, *logging]
+    mem_limit: $MEM_REDIS
+    memswap_limit: $MEMSWAP_REDIS
     volumes:
       - valkey-socket:/var/run/valkey
     command: >

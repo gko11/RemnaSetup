@@ -127,6 +127,12 @@ install_components() {
 
         sed -i "s|\$PANEL_PORT|$PANEL_PORT|g" docker-compose.yml
 
+        # Лимиты памяти от RAM хоста: суммарно около 65%, остальное ядру и docker.
+        info "$(get_string "mem_limits_header" "$(host_ram_mb)")"
+        set_container_limits docker-compose.yml PANEL 30 512 4096
+        set_container_limits docker-compose.yml DB    25 512 4096
+        set_container_limits docker-compose.yml REDIS 10 128  512
+
         docker compose up -d
     fi
 
@@ -140,6 +146,8 @@ install_components() {
 
         sed -i "s|\$PANEL_DOMAIN|$PANEL_DOMAIN|g" Caddyfile
         sed -i "s|\$PANEL_PORT|$PANEL_PORT|g" Caddyfile
+
+        set_container_limits docker-compose.yml CADDY 5 128 512
 
         docker compose up -d
     fi
