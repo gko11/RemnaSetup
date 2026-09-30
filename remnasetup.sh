@@ -104,7 +104,8 @@ display_remnanode_menu() {
         echo -e "${BLUE}6. Install BBR only${RESET}"
         echo -e "${BLUE}7. Install WARP SOCKS5 proxy (Docker)${RESET}"
         echo -e "${BLUE}8. Update Remnanode${RESET}"
-        echo -e "${BLUE}9. Back${RESET}"
+        echo -e "${BLUE}9. Apply resource limits to an existing node${RESET}"
+        echo -e "${BLUE}10. Back${RESET}"
     else
         echo -e "${BLUE}1. Полная установка (Remnanode + Selfsteal/Nginx + BBR + WARP SOCKS5)${RESET}"
         echo -e "${BLUE}2. Только Remnanode${RESET}"
@@ -114,7 +115,8 @@ display_remnanode_menu() {
         echo -e "${BLUE}6. Только BBR${RESET}"
         echo -e "${BLUE}7. Установить WARP SOCKS5 прокси (Docker)${RESET}"
         echo -e "${BLUE}8. Обновить Remnanode${RESET}"
-        echo -e "${BLUE}9. Назад${RESET}"
+        echo -e "${BLUE}9. Выставить лимиты ресурсов на уже установленной ноде${RESET}"
+        echo -e "${BLUE}10. Назад${RESET}"
     fi
     echo
     read -p "$(echo -e "${BOLD_CYAN}$(get_string "select_option"):${RESET}") " REMNANODE_OPTION
@@ -199,6 +201,9 @@ handle_command() {
             run_script "${SCRIPT_DIR}/scripts/remnanode/install-bbr.sh"
             exit 0
             ;;
+        apply-limits)
+            run_script "${SCRIPT_DIR}/scripts/remnanode/apply-limits.sh"
+            ;;
         install-warp)
             run_script "${SCRIPT_DIR}/scripts/remnanode/install-warp.sh"
             exit 0
@@ -217,6 +222,7 @@ handle_command() {
             echo "  install-nginx-node   - Install Nginx only"
             echo "  install-bbr          - Install BBR only"
             echo "  install-warp         - Install WARP SOCKS5 proxy (Docker)"
+            echo "  apply-limits         - Apply memory limits + sysctl tuning to an existing node"
             echo "  update-node          - Update Remnanode"
             exit 1
             ;;
@@ -268,7 +274,8 @@ main() {
                         6) run_script "${SCRIPT_DIR}/scripts/remnanode/install-bbr.sh" ;;
                         7) run_script "${SCRIPT_DIR}/scripts/remnanode/install-warp.sh" ;;
                         8) run_script "${SCRIPT_DIR}/scripts/remnanode/update.sh" ;;
-                        9) break ;;
+                        9) run_script "${SCRIPT_DIR}/scripts/remnanode/apply-limits.sh" ;;
+                        10) break ;;
                         *) warn "$(get_string "invalid_choice")" ;;
                     esac
                 done

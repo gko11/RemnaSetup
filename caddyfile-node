@@ -1,0 +1,15 @@
+$DOMAIN:$MONITOR_PORT {
+    @local {
+        remote_ip 127.0.0.1 ::1
+    }
+
+    handle @local {
+        root * /var/www/site
+        try_files {path} /index.html
+        file_server
+    }
+
+    handle {
+        abort
+    }
+}

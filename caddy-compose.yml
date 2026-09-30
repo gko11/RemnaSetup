@@ -1,0 +1,34 @@
+services:
+    caddy:
+        image: caddy:2.9
+        container_name: 'caddy'
+        hostname: caddy
+        restart: always
+        # Лимиты подставляет установщик от объёма RAM хоста.
+        mem_limit: $MEM_CADDY
+        memswap_limit: $MEMSWAP_CADDY
+        ports:
+            - '0.0.0.0:443:443'
+            - '0.0.0.0:80:80'
+        networks:
+            - remnawave-network
+        volumes:
+            - ./Caddyfile:/etc/caddy/Caddyfile
+            - caddy-ssl-data:/data
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+
+networks:
+    remnawave-network:
+        name: remnawave-network
+        driver: bridge
+        external: true
+
+volumes:
+    caddy-ssl-data:
+        driver: local
+        external: false
+        name: caddy-ssl-data

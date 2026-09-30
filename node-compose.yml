@@ -1,0 +1,28 @@
+services:
+  remnanode:
+    container_name: remnanode
+    hostname: remnanode
+    image: remnawave/node:latest
+    network_mode: host
+    restart: always
+    cap_add:
+      - NET_ADMIN
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+    # Лимит памяти подставляет установщик от объёма RAM хоста.
+    # Без него утечка в xray утягивает в своп всю ноду целиком.
+    mem_limit: $MEM_NODE
+    memswap_limit: $MEMSWAP_NODE
+    environment:
+      - NODE_PORT=$NODE_PORT
+      - SECRET_KEY="$SECRET_KEY"
+    volumes:
+      - /var/log/remnanode:/var/log/remnanode
+    logging:
+      # xray с loglevel debug пишет гигабайты за сутки — режем на уровне docker
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
