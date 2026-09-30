@@ -573,9 +573,22 @@ write_compose() {
     # съедал 8 ГБ, выдавливая систему в своп. Лимит превращает это из
     # "легла вся нода" в "контейнер перезапустился за две секунды".
     # В норме wireproxy живёт в пределах сотни мегабайт, гигабайта хватает.
-    local mem_limit swap_line=""
-    mem_limit="${WARP_MEM_LIMIT:-$(mem_limit_mb 15 256 1024)}"
-    if swap_accounting_available; then
+    local mem_limit swap_line="" go_limit
+    if declare -F mem_limit_mb >/dev/null; then
+        mem_limit="${WARP_MEM_LIMIT:-$(mem_limit_mb 15 256 1024)}"
+    else
+        # functions.sh устарел — не оставляем compose без лимита вовсе
+        mem_limit="${WARP_MEM_LIMIT:-1024m}"
+        warn "mem_limit_mb() недоступна, беру значение по умолчанию: ${mem_limit}"
+    fi
+    [ -n "$mem_limit" ] || mem_limit="1024m"
+
+    # Мягкий потолок для сборщика мусора Go: ставим ниже жёсткого лимита,
+    # чтобы GC начинал работать раньше, чем ядро дойдёт до OOM. Если рост
+    # памяти — накопленный мусор, а не утечка, до убийства не дойдёт вовсе.
+    go_limit=$(( ${mem_limit%m} * 80 / 100 ))
+
+    if declare -F swap_accounting_available >/dev/null && swap_accounting_available; then
         # равный mem_limit запрещает уползание в своп: лучше быстрый OOM
         swap_line=$'\n    memswap_limit: '"${mem_limit}"
     fi
@@ -594,6 +607,8 @@ services:
       - WARP_PLUS=false
       - SOCKS5_PORT=1080
       - TZ=${TZ_VAL}
+      - GOMEMLIMIT=${go_limit}MiB
+      - GOGC=50
     # Аккаунт WARP живёт здесь. Без этого volume он теряется при каждом
     # пересоздании контейнера и начинается повторная регистрация.
     volumes:

@@ -65,6 +65,11 @@ t() {
             verify)     echo "Verify with: docker stats --no-stream" ;;
             no_docker)  echo "docker not found" ;;
             no_daemon)  echo "docker daemon is not running" ;;
+            goenv)      echo "Go memory tuning added" ;;
+            check_hdr)  echo "Verification" ;;
+            check_ok)   echo "OK" ;;
+            check_bad)  echo "LIMIT NOT APPLIED" ;;
+            check_hint) echo "If something says LIMIT NOT APPLIED, /opt/remnasetup on this node is likely outdated: cd /opt/remnasetup && git pull" ;;
         esac
     else
         case "$key" in
@@ -90,6 +95,11 @@ t() {
             verify)     echo "Проверить: docker stats --no-stream" ;;
             no_docker)  echo "docker не найден" ;;
             no_daemon)  echo "демон docker не запущен" ;;
+            goenv)      echo "добавлен тюнинг памяти Go" ;;
+            check_hdr)  echo "Проверка результата" ;;
+            check_ok)   echo "ОК" ;;
+            check_bad)  echo "ЛИМИТ НЕ ПРИМЕНЁН" ;;
+            check_hint) echo "Если где-то ЛИМИТ НЕ ПРИМЕНЁН — на этой ноде, скорее всего, устаревший /opt/remnasetup: cd /opt/remnasetup && git pull" ;;
         esac
     fi
 }
@@ -136,6 +146,38 @@ PY
         2) warn "   container_name: $container в $file не найден"; return 1 ;;
         *) warn "   не удалось изменить $file"; return 1 ;;
     esac
+}
+
+# Мягкий потолок сборщика мусора Go. Ставим ниже жёсткого лимита контейнера:
+# если рост памяти — накопленный мусор, GC разберёт его раньше, чем ядро
+# дойдёт до OOM, и перезапусков не будет вовсе.
+add_go_env() {
+    local file="$1" container="$2" mem="$3"
+    grep -q "GOMEMLIMIT" "$file" && return 1
+    python3 - "$file" "$container" "$mem" <<'PY2'
+import io, re, sys
+path, container, mem = sys.argv[1:4]
+lines = io.open(path, encoding="utf-8").read().split("\n")
+idx = next((i for i, l in enumerate(lines)
+            if re.match(r'^\s+container_name:\s*[\'"]?%s[\'"]?\s*$' % re.escape(container), l)), None)
+if idx is None:
+    sys.exit(2)
+svc_indent = len(re.match(r'^(\s+)', lines[idx]).group(1))
+env = None
+for i in range(idx, len(lines)):
+    m = re.match(r'^(\s+)environment:\s*$', lines[i])
+    if m and len(m.group(1)) == svc_indent:
+        env = i
+        break
+    if re.match(r'^\s{0,%d}\S' % (svc_indent - 1), lines[i]) and i > idx:
+        break
+if env is None:
+    sys.exit(3)
+soft = int(re.sub(r'[^0-9]', '', mem)) * 80 // 100
+pad = " " * (svc_indent + 2)
+lines[env + 1:env + 1] = [f"{pad}- GOMEMLIMIT={soft}MiB", f"{pad}- GOGC=50"]
+io.open(path, "w", encoding="utf-8").write("\n".join(lines))
+PY2
 }
 
 apply_to() {
@@ -230,22 +272,53 @@ main() {
     apply_to selfsteal  5 128  512 ""
     apply_to caddy      5 128  512 ""
 
-    # warproxy — через свой установщик: он и compose перегенерирует, и аккаунт
-    # WARP сохранит. Руками трогать нельзя, иначе поедет регистрация.
-    if [ "${SKIP_WARP:-0}" != "1" ]; then
-        if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx warproxy; then
-            echo -e "${BOLD_CYAN}▸ warproxy${RESET}"
-            echo "   $(t warp_via)"
-            WARP_MODE=keep SKIP_PAUSE=true \
-                bash /opt/remnasetup/scripts/remnanode/install-warp.sh \
-                || warn "   install-warp.sh вернул ошибку — смотрите вывод выше"
+    # warproxy правим напрямую: на ноде может лежать старая версия
+    # install-warp.sh, которая про лимиты ничего не знает. Тома при этом
+    # не трогаются, так что аккаунт WARP остаётся на месте.
+    if [ "${SKIP_WARP:-0}" != "1" ] && docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx warproxy; then
+        local wmem wswap wdir
+        wmem="${WARP_MEM_LIMIT:-$(mem_limit_mb 15 256 1024)}"
+        wswap=""; swap_accounting_available && wswap="$wmem"
+        wdir=$(compose_dir warproxy)
+
+        echo -e "${BOLD_CYAN}▸ warproxy${RESET}"
+        if [ -n "$wdir" ] && [ -f "${wdir}/docker-compose.yml" ]; then
+            cp "${wdir}/docker-compose.yml" "${wdir}/docker-compose.yml.bak.$(date +%Y%m%d-%H%M%S)"
+            patch_compose "${wdir}/docker-compose.yml" warproxy "$wmem" "$wswap"
+            add_go_env   "${wdir}/docker-compose.yml" warproxy "$wmem" && echo "   $(t goenv)"
+            (cd "$wdir" && docker compose up -d >/dev/null 2>&1) \
+                && echo "   $(t recreated)" \
+                || warn "   docker compose up -d завершился с ошибкой"
         else
-            echo -e "${BOLD_CYAN}▸ warproxy${RESET}"
-            echo "   $(t warp_skip)"
+            echo "   $(t no_compose)"
+            if [ -n "$wswap" ]; then
+                docker update --memory "$wmem" --memory-swap "$wswap" warproxy >/dev/null 2>&1
+            else
+                docker update --memory "$wmem" warproxy >/dev/null 2>&1
+            fi && echo "   $(t live_only): $wmem"
         fi
+        # рестарт освобождает то, что уже утекло
+        docker restart warproxy >/dev/null 2>&1
+    elif [ "${SKIP_WARP:-0}" != "1" ]; then
+        echo -e "${BOLD_CYAN}▸ warproxy${RESET}"
+        echo "   $(t warp_skip)"
     fi
 
     tune_sysctl
+
+    echo
+    echo -e "${BOLD_CYAN}$(t check_hdr)${RESET}"
+    local bad=0
+    for c in "${present[@]}"; do
+        local lim; lim=$(docker inspect "$c" --format '{{.HostConfig.Memory}}' 2>/dev/null)
+        if [ -n "$lim" ] && [ "$lim" -gt 0 ] 2>/dev/null; then
+            printf "   %-12s %s (%s MB)\n" "$c" "$(t check_ok)" "$(( lim / 1024 / 1024 ))"
+        else
+            printf "   %-12s ${BOLD_RED}%s${RESET}\n" "$c" "$(t check_bad)"
+            bad=1
+        fi
+    done
+    [ "$bad" = "1" ] && warn "$(t check_hint)"
 
     echo
     echo -e "$(t after):"; free -h | sed 's/^/   /'
