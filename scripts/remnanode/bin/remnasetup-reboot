@@ -1,0 +1,25 @@
+#!/bin/bash
+#
+# remnasetup-reboot — плановая перезагрузка сервера (таймер remnasetup-reboot.timer).
+# Ждёт, пока закончится обновление ноды, и не перезагружает сервер,
+# который поднялся меньше 30 минут назад (защита от петли перезагрузок).
+
+set -uo pipefail
+LOG=/var/log/remnasetup-maintenance.log
+CONF=/etc/remnasetup/maintenance.env
+LOCK=/run/remnasetup-maintenance.lock
+UI_LANG=ru; NODE_NAME=""
+[ -f "$CONF" ] && . "$CONF"
+m() { if [ "$UI_LANG" = "en" ]; then echo "$2"; else echo "$1"; fi; }
+log() { echo "$(date '+%F %T') [reboot] $*" | tee -a "$LOG"; }
+
+up=$(cut -d. -f1 /proc/uptime)
+if [ "$up" -lt 1800 ]; then
+    log "$(m "сервер работает всего ${up} с — перезагрузку пропускаю" "uptime only ${up}s — reboot skipped")"
+    exit 0
+fi
+exec 9>"$LOCK"
+flock -w 900 9 || log "$(m 'обновление идёт дольше 15 минут — перезагружаю всё равно' 'update runs >15 min — rebooting anyway')"
+log "$(m 'плановая перезагрузка' 'scheduled reboot')"
+sync
+systemctl reboot

@@ -118,6 +118,7 @@ install_remnanode() {
     cd /opt/remnanode || exit 1
 
     cp "/opt/remnasetup/data/docker/node-compose.yml" docker-compose.yml
+    install -d -m 700 /opt/remnanode/hy2-certs
 
     sed -i "s|\$NODE_PORT|$NODE_PORT|g" docker-compose.yml
     sed -i "s|\$SECRET_KEY|$SECRET_KEY|g" docker-compose.yml

@@ -39,11 +39,13 @@ curl -fsSL https://raw.githubusercontent.com/gko11/RemnaSetup/refs/heads/main/in
 - Backup and restore (manual, automatic, with Telegram or S3-compatible storage)
 
 ### Remnanode (node)
-- Full installation (Remnanode + Caddy/Nginx + BBR + WARP)
-- Web server choice: **Caddy** or **Nginx** with self-steal
-- Nginx: proxy protocol support, certificates via Cloudflare DNS-01 / HTTP-01 / Gcore DNS-01
+- Full installation (Remnanode + Selfsteal on Docker + Caddy + BBR + WARP)
 - IPv6 management
 - WARP SOCKS5 proxy (Docker) — registration via wgcf ≥ 2.3.0, no re-registrations, ready TikTok → WARP routing
+- **Node update without needless restarts**: no new version — the container is untouched; a new one fails to start — automatic rollback
+- **Maintenance schedule**: own update day per server and a scheduled reboot, Moscow time (systemd timers)
+- **Hysteria2**: certificate taken from Caddy (or Caddy obtains it), mounted into the node container, daily sync, UDP 443
+- BBR optimization (via /etc/sysctl.d, no duplicates)
 - BBR optimization
 
 ---
@@ -60,23 +62,6 @@ MONITOR_PORT=8443 \
 NODE_PORT=3001 \
 SECRET_KEY='your_key' \
 WEBSERVER=caddy \
-INSTALL_WARP=y \
-BBR_ANSWER=y \
-sudo -E bash /opt/remnasetup/remnasetup.sh install-node
-```
-
-### Full node installation with Nginx
-
-```bash
-DOMAIN=node.example.com \
-MONITOR_PORT=8443 \
-NODE_PORT=3001 \
-SECRET_KEY='your_key' \
-WEBSERVER=nginx \
-USE_PROXY_PROTOCOL=n \
-CERT_METHOD=1 \
-CF_API_KEY='token' \
-CF_EMAIL='email@example.com' \
 INSTALL_WARP=y \
 BBR_ANSWER=y \
 sudo -E bash /opt/remnasetup/remnasetup.sh install-node
@@ -101,10 +86,11 @@ sudo -E bash /opt/remnasetup/remnasetup.sh install-node
 | `install-node` | Full node installation |
 | `install-node-only` | Remnanode only |
 | `install-caddy-node` | Caddy only |
-| `install-nginx-node` | Nginx only |
 | `install-bbr` | BBR only |
 | `install-warp` | WARP SOCKS5 (Docker) only |
-| `update-node` | Update Remnanode |
+| `update-node` | Update Remnanode (no restart if no new version; rollback if the new one fails) |
+| `maintenance` | Schedule: update day + reboot |
+| `install-hy2` | Hysteria2: certificate from Caddy + node preparation |
 
 ### Environment variables
 
@@ -114,13 +100,6 @@ sudo -E bash /opt/remnasetup/remnasetup.sh install-node
 | `MONITOR_PORT` | Web server port | `8443` |
 | `NODE_PORT` | Node port | `3001` |
 | `SECRET_KEY` | Panel connection key | — |
-| `WEBSERVER` | `caddy` or `nginx` | — |
-| `USE_PROXY_PROTOCOL` | `y` / `n` (nginx only) | — |
-| `CERT_METHOD` | `1` (Cloudflare) / `2` (HTTP-01) / `3` (Gcore) | — |
-| `CF_API_KEY` | Cloudflare API token (cert_method=1) | — |
-| `CF_EMAIL` | Cloudflare email (cert_method=1) | — |
-| `LE_EMAIL` | Email for certificate (cert_method=2/3) | — |
-| `GCORE_API_KEY` | Gcore API token (cert_method=3) | — |
 | `INSTALL_WARP` | `y` / `n` | — |
 | `BBR_ANSWER` | `y` / `n` | — |
 | `SKIP_WEBSERVER` | `true` — skip web server | — |
@@ -134,7 +113,16 @@ sudo -E bash /opt/remnasetup/remnasetup.sh install-node
 | `SKIP_BBR` | `true` — skip BBR | — |
 | `UPDATE_REMNANODE` | `true` — reinstall node | — |
 | `UPDATE_CADDY` | `true` — reinstall Caddy | — |
-| `UPDATE_NGINX` | `true` — reinstall Nginx | — |
+| `UPDATE_DAY` | node update day `1`–`7` (Mon–Sun) or `off` | from old crontab / `3` |
+| `UPDATE_TIME` | update time, HH:MM in `MAINT_TZ` | `01:00` |
+| `REBOOT_MODE` | `daily` / `weekly` / `off` | `daily` |
+| `REBOOT_DAY` / `REBOOT_TIME` | reboot day (for `weekly`) and time | `03:00` |
+| `MAINT_TZ` | schedule time zone | `Europe/Moscow` |
+| `TG_TOKEN` / `TG_CHAT` / `NODE_NAME` | Telegram alert if the node fails after an update | — |
+| `REMOVE_OLD_CRON` | `y` / `n` — remove old crontab update/reboot lines | `y` |
+| `SETUP_MAINTENANCE` | `y` / `n` — set up the schedule at the end of full install | `y` |
+| `HY2_DOMAIN` | Hysteria2 domain | selfsteal domain |
+| `HY2_ISSUE` / `HY2_RECREATE` / `HY2_UFW` | `y`/`n`: issue via Caddy, recreate container, open 443/udp | `y` |
 | `LANGUAGE` | `ru` / `en` | `ru` |
 
 Without arguments the script runs in interactive menu mode.

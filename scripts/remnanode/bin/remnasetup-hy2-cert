@@ -1,0 +1,94 @@
+#!/bin/bash
+#
+# remnasetup-hy2-cert — сертификат для Hysteria2 из Caddy (selfsteal).
+#
+# Hysteria2 (QUIC) сам предъявляет TLS-сертификат домена — в отличие от Reality,
+# которому сертификат не нужен. Новый не выпускаем: берём тот, что Caddy уже
+# получил и продлевает, и кладём копию туда, где её видит контейнер ноды:
+#     /opt/remnanode/hy2-certs/fullchain.pem  →  в контейнере /hy2-certs/fullchain.pem
+#     /opt/remnanode/hy2-certs/privkey.pem    →  в контейнере /hy2-certs/privkey.pem
+# Таймер remnasetup-hy2-cert.timer запускает это раз в сутки: Caddy продлевает
+# сертификат за 30 дней до конца, копия обновляется на следующую ночь.
+# Xray сам перечитывает файл сертификата (раз в час), перезапуск ноды не нужен.
+#
+# remnasetup-hy2-cert [--domain D] [--find]
+#   --find   только показать найденные сертификаты, ничего не копировать
+# Без --domain берётся домен из /etc/remnasetup/hy2.env или /opt/selfsteal/.env
+
+set -uo pipefail
+DST=/opt/remnanode/hy2-certs
+LOG=/var/log/remnasetup-maintenance.log
+CONF=/etc/remnasetup/hy2.env
+UI_LANG=ru; DOMAIN=""; FIND=0
+[ -f /etc/remnasetup/maintenance.env ] && . /etc/remnasetup/maintenance.env
+[ -f "$CONF" ] && . "$CONF"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --domain) DOMAIN="$2"; shift 2 ;;
+        --find) FIND=1; shift ;;
+        *) shift ;;
+    esac
+done
+[ -z "$DOMAIN" ] && [ -f /opt/selfsteal/.env ] && DOMAIN=$(grep -E '^DOMAIN=' /opt/selfsteal/.env | cut -d= -f2-)
+m() { if [ "$UI_LANG" = "en" ]; then echo "$2"; else echo "$1"; fi; }
+log() { echo "$(date '+%F %T') [hy2-cert] $*" | tee -a "$LOG"; }
+[ -n "$DOMAIN" ] || { log "$(m 'домен не задан (--domain)' 'no domain (--domain)')"; exit 2; }
+
+# Где Caddy и certbot хранят сертификаты. Docker-тома ищем по имени (*caddy_data),
+# а не по фиксированному пути — имя проекта compose бывает разным.
+roots() {
+    local v mp
+    for v in $(docker volume ls -q 2>/dev/null | grep -E 'caddy_data$'); do
+        mp=$(docker volume inspect -f '{{.Mountpoint}}' "$v" 2>/dev/null)
+        [ -d "$mp/caddy/certificates" ] && echo "$mp/caddy/certificates"
+    done
+    for d in /var/lib/caddy/.local/share/caddy/certificates /root/.local/share/caddy/certificates \
+             /opt/selfsteal/data/caddy/certificates /opt/caddy/data/caddy/certificates; do
+        [ -d "$d" ] && echo "$d"
+    done
+}
+
+# Кандидаты: точное имя и wildcard на родительский домен.
+candidates() {
+    local parent="${DOMAIN#*.}" r
+    for r in $(roots); do
+        find "$r" -type f \( -name "${DOMAIN}.crt" -o -name "wildcard_.${parent}.crt" \) 2>/dev/null
+    done
+    for f in "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "/etc/letsencrypt/live/${parent}/fullchain.pem"; do
+        [ -f "$f" ] && echo "$f"
+    done
+}
+
+keyfor() { case "$1" in *.crt) echo "${1%.crt}.key" ;; *) echo "$(dirname "$1")/privkey.pem" ;; esac; }
+
+valid_for_domain() { # файл, покрывает DOMAIN, не истекает в ближайшие 3 дня
+    openssl x509 -in "$1" -noout -checkend 259200 >/dev/null 2>&1 || return 1
+    openssl x509 -in "$1" -noout -ext subjectAltName 2>/dev/null \
+        | grep -qE "DNS:(${DOMAIN//./\\.}|\*\.${DOMAIN#*.})([,[:space:]]|$)"
+}
+
+BEST=""; BEST_END=0
+while read -r c; do
+    [ -n "$c" ] || continue
+    k=$(keyfor "$c"); [ -f "$k" ] || continue
+    end=$(date -d "$(openssl x509 -in "$c" -noout -enddate 2>/dev/null | cut -d= -f2)" +%s 2>/dev/null || echo 0)
+    if valid_for_domain "$c"; then ok=OK; else ok=SKIP; fi
+    [ $FIND -eq 1 ] && echo "$ok  $(date -d @"$end" +%F 2>/dev/null)  $c"
+    if [ "$ok" = OK ] && [ "$end" -gt "$BEST_END" ]; then BEST="$c"; BEST_END=$end; fi
+done < <(candidates | sort -u)
+
+[ $FIND -eq 1 ] && { [ -n "$BEST" ] && exit 0 || exit 1; }
+if [ -z "$BEST" ]; then
+    log "$(m "не найден действующий сертификат для $DOMAIN" "no valid certificate for $DOMAIN")"
+    exit 1
+fi
+
+install -d -m 700 "$DST"
+KEY=$(keyfor "$BEST")
+if cmp -s "$BEST" "$DST/fullchain.pem" && cmp -s "$KEY" "$DST/privkey.pem"; then
+    exit 0
+fi
+install -m 644 "$BEST" "$DST/fullchain.pem.new" && install -m 600 "$KEY" "$DST/privkey.pem.new"
+mv -f "$DST/privkey.pem.new" "$DST/privkey.pem"; mv -f "$DST/fullchain.pem.new" "$DST/fullchain.pem"
+log "$(m "сертификат $DOMAIN обновлён (до $(date -d @"$BEST_END" +%F))" "certificate for $DOMAIN updated (until $(date -d @"$BEST_END" +%F))")"
+exit 0

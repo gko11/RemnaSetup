@@ -20,6 +20,9 @@ services:
       - SECRET_KEY="$SECRET_KEY"
     volumes:
       - /var/log/remnanode:/var/log/remnanode
+      # Сертификат для Hysteria2 (кладёт remnasetup-hy2-cert). Пустая папка ничему не мешает,
+      # зато включение Hysteria потом не требует правки compose и пересоздания контейнера.
+      - /opt/remnanode/hy2-certs:/hy2-certs:ro
     logging:
       # xray с loglevel debug пишет гигабайты за сутки — режем на уровне docker
       driver: json-file

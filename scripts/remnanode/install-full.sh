@@ -23,6 +23,7 @@ get_string_local() {
             sum_account)          echo "WARP account:" ;;
             sum_dont_delete)      echo "DO NOT delete!" ;;
             sum_tiktok)           echo "Xray snippet for TikTok:" ;;
+            ask_maint)            echo "Set up the maintenance schedule (update day + reboot)? [Y/n]:" ;;
             *) echo "$key" ;;
         esac
     else
@@ -41,6 +42,7 @@ get_string_local() {
             sum_account)          echo "Аккаунт WARP:" ;;
             sum_dont_delete)      echo "НЕ удалять!" ;;
             sum_tiktok)           echo "Сниппет Xray для TikTok:" ;;
+            ask_maint)            echo "Настроить расписание обслуживания (день обновления + перезагрузка)? [Y/n]:" ;;
             *) echo "$key" ;;
         esac
     fi
@@ -68,26 +70,6 @@ native_warp_installed() {
     [ -f /etc/wireguard/warp.conf ] || \
         systemctl is-enabled wg-quick@warp >/dev/null 2>&1 || \
         systemctl is-active wg-quick@warp >/dev/null 2>&1
-}
-
-stop_caddy_if_running() {
-    # системный Caddy (старые версии скрипта)
-    if command -v caddy >/dev/null 2>&1 && systemctl is-active --quiet caddy 2>/dev/null; then
-        warn "$(get_string "install_nginx_node_caddy_detected")"
-        systemctl stop caddy 2>/dev/null || true
-        systemctl disable caddy 2>/dev/null || true
-        success "$(get_string "install_nginx_node_caddy_stopped")"
-    fi
-    # Docker-selfsteal этой сборки: останавливаем без down -v, сертификаты в volume остаются
-    if [ -f /opt/selfsteal/docker-compose.yml ] || docker ps --format '{{.Names}}' 2>/dev/null | grep -qx selfsteal; then
-        warn "$(get_string "install_nginx_node_caddy_detected")"
-        if [ -f /opt/selfsteal/docker-compose.yml ]; then
-            (cd /opt/selfsteal && docker compose stop) >/dev/null 2>&1 || true
-            (cd /opt/selfsteal && docker compose rm -f) >/dev/null 2>&1 || true
-        fi
-        docker rm -f selfsteal >/dev/null 2>&1 || true
-        success "$(get_string "install_nginx_node_caddy_stopped")"
-    fi
 }
 
 install_docker() {
@@ -162,37 +144,6 @@ check_components() {
         fi
     fi
 
-    if command -v nginx >/dev/null 2>&1; then
-        info "$(get_string "install_full_node_nginx_installed")"
-        if [[ -z "$DETECTED_WEBSERVER" ]]; then
-            DETECTED_WEBSERVER="nginx"
-        fi
-        if [[ "$SKIP_WEBSERVER" == "true" ]]; then
-            info "SKIP_WEBSERVER=true, skipping..."
-        elif [[ -n "$WEBSERVER" ]]; then
-            if [[ "$WEBSERVER" == "nginx" ]]; then
-                UPDATE_NGINX=true
-                info "WEBSERVER=nginx, will update..."
-            fi
-        elif [[ "$UPDATE_NGINX" == "true" ]]; then
-            info "UPDATE_NGINX=true, will update..."
-        else
-            while true; do
-                question "$(get_string "install_full_node_update_nginx")"
-                UPDATE_NGINX="$REPLY"
-                if [[ "$UPDATE_NGINX" == "y" || "$UPDATE_NGINX" == "Y" ]]; then
-                    UPDATE_NGINX=true
-                    break
-                elif [[ "$UPDATE_NGINX" == "n" || "$UPDATE_NGINX" == "N" ]]; then
-                    SKIP_NGINX=true
-                    break
-                else
-                    warn "$(get_string "install_full_node_please_enter_yn")"
-                fi
-            done
-        fi
-    fi
-
     # WARP: режим (сохранить аккаунт / перерегистрировать) спрашивает сам install-warp.sh
     if native_warp_installed; then
         info "$(get_string_local "native_warp_found")"
@@ -244,61 +195,8 @@ request_data() {
             done
         fi
 
-        if [[ -n "$WEBSERVER" ]]; then
-            info "WEBSERVER=$WEBSERVER"
-        else
-            echo ""
-            info "$(get_string "install_full_node_webserver_choice")"
-            echo -e "${BLUE}1. $(get_string "install_full_node_webserver_caddy")${RESET}"
-            echo -e "${BLUE}2. $(get_string "install_full_node_webserver_nginx")${RESET}"
-            echo ""
-            while true; do
-                question "$(get_string "install_full_node_webserver_choose")"
-                WEBSERVER_CHOICE="$REPLY"
-                if [[ "$WEBSERVER_CHOICE" == "1" ]]; then
-                    WEBSERVER="caddy"
-                    break
-                elif [[ "$WEBSERVER_CHOICE" == "2" ]]; then
-                    WEBSERVER="nginx"
-                    break
-                fi
-                warn "$(get_string "install_full_node_webserver_invalid")"
-            done
-        fi
-
-        if [[ "$WEBSERVER" == "nginx" ]]; then
-            if [[ -n "$USE_PROXY_PROTOCOL" ]]; then
-                info "USE_PROXY_PROTOCOL=$USE_PROXY_PROTOCOL"
-            else
-                while true; do
-                    question "$(get_string "install_nginx_node_use_proxy_protocol")"
-                    USE_PROXY_PROTOCOL="$REPLY"
-                    if [[ "$USE_PROXY_PROTOCOL" == "y" || "$USE_PROXY_PROTOCOL" == "Y" || "$USE_PROXY_PROTOCOL" == "n" || "$USE_PROXY_PROTOCOL" == "N" ]]; then
-                        break
-                    fi
-                    warn "$(get_string "install_full_node_please_enter_yn")"
-                done
-            fi
-
-            if [[ -n "$CERT_METHOD" ]]; then
-                info "CERT_METHOD=$CERT_METHOD"
-            else
-                echo ""
-                info "$(get_string "install_nginx_node_cert_method_prompt")"
-                echo -e "${BLUE}1. Cloudflare DNS-01 (wildcard)${RESET}"
-                echo -e "${BLUE}2. HTTP-01 / standalone${RESET}"
-                echo -e "${BLUE}3. Gcore DNS-01 (wildcard)${RESET}"
-                echo ""
-                while true; do
-                    question "$(get_string "install_nginx_node_cert_method_choose")"
-                    CERT_METHOD="$REPLY"
-                    if [[ "$CERT_METHOD" =~ ^[1-3]$ ]]; then
-                        break
-                    fi
-                    warn "$(get_string "install_nginx_node_cert_method_invalid")"
-                done
-            fi
-        fi
+        # selfsteal в этой сборке — только Docker + Caddy
+        WEBSERVER="caddy"
     fi
 
     if [[ "$SKIP_REMNANODE" != "true" ]]; then
@@ -474,11 +372,12 @@ install_warp() {
 }
 
 install_bbr() {
+    # sysctl.d вместо дописывания в sysctl.conf: повторный запуск не плодит дубли
     info "$(get_string "install_full_node_installing_bbr")"
-    modprobe tcp_bbr
-    echo "net.core.default_qdisc=fq" | tee -a /etc/sysctl.conf
-    echo "net.ipv4.tcp_congestion_control=bbr" | tee -a /etc/sysctl.conf
-    sysctl -p
+    modprobe tcp_bbr 2>/dev/null || true
+    echo tcp_bbr > /etc/modules-load.d/bbr.conf
+    printf 'net.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr\n' > /etc/sysctl.d/60-bbr.conf
+    sysctl -q -p /etc/sysctl.d/60-bbr.conf
     success "$(get_string "install_full_node_bbr_installed_success")"
 }
 
@@ -526,226 +425,6 @@ install_caddy() {
     bash /opt/remnasetup/scripts/remnanode/install-caddy.sh
 }
 
-install_nginx_selfsteal() {
-    info "$(get_string "install_full_node_installing_nginx")"
-
-    stop_caddy_if_running
-
-    apt-get install -y nginx certbot
-
-    info "$(get_string "install_full_node_setup_site")"
-
-    if [ -d "/var/www/site" ]; then
-        rm -rf /var/www/site/*
-    else
-        mkdir -p /var/www/site
-    fi
-    mkdir -p /var/www/html
-
-    RANDOM_META_ID=$(openssl rand -hex 16)
-    RANDOM_CLASS=$(openssl rand -hex 8)
-    RANDOM_COMMENT=$(openssl rand -hex 12)
-
-    META_NAMES=("render-id" "view-id" "page-id" "config-id")
-    RANDOM_META_NAME=${META_NAMES[$RANDOM % ${#META_NAMES[@]}]}
-
-    cp -r "/opt/remnasetup/data/site/"* /var/www/site/
-
-    sed -i "/<meta name=\"viewport\"/a \    <meta name=\"$RANDOM_META_NAME\" content=\"$RANDOM_META_ID\">\n    <!-- $RANDOM_COMMENT -->" /var/www/site/index.html
-    sed -i "s/<body/<body class=\"$RANDOM_CLASS\"/" /var/www/site/index.html
-
-    sed -i "1i /* $RANDOM_COMMENT */" /var/www/site/assets/style.css
-    sed -i "1i // $RANDOM_COMMENT" /var/www/site/assets/main.js
-
-    local base_domain
-    base_domain=$(echo "$DOMAIN" | awk -F. '{print $(NF-1)"."$NF}')
-    local wildcard_domain="*.$base_domain"
-
-    case $CERT_METHOD in
-        1)
-            if [[ -n "$CF_API_KEY" ]]; then
-                info "CF_API_KEY=***"
-            else
-                while true; do
-                    question "$(get_string "install_nginx_node_enter_cf_token")"
-                    CF_API_KEY="$REPLY"
-                    if [[ -n "$CF_API_KEY" ]]; then break; fi
-                    warn "$(get_string "install_nginx_node_token_empty")"
-                done
-            fi
-            if [[ -n "$CF_EMAIL" ]]; then
-                info "CF_EMAIL=$CF_EMAIL"
-            else
-                while true; do
-                    question "$(get_string "install_nginx_node_enter_cf_email")"
-                    CF_EMAIL="$REPLY"
-                    if [[ -n "$CF_EMAIL" ]]; then break; fi
-                    warn "$(get_string "install_nginx_node_email_empty")"
-                done
-            fi
-
-            apt-get install -y python3-certbot-dns-cloudflare
-
-            mkdir -p ~/.secrets/certbot
-            if [[ $CF_API_KEY =~ [A-Z] ]]; then
-                cat > ~/.secrets/certbot/cloudflare.ini <<EOL
-dns_cloudflare_api_token = $CF_API_KEY
-EOL
-            else
-                cat > ~/.secrets/certbot/cloudflare.ini <<EOL
-dns_cloudflare_email = $CF_EMAIL
-dns_cloudflare_api_key = $CF_API_KEY
-EOL
-            fi
-            chmod 600 ~/.secrets/certbot/cloudflare.ini
-
-            certbot certonly \
-                --dns-cloudflare \
-                --dns-cloudflare-credentials ~/.secrets/certbot/cloudflare.ini \
-                --dns-cloudflare-propagation-seconds 60 \
-                -d "$base_domain" \
-                -d "$wildcard_domain" \
-                --email "$CF_EMAIL" \
-                --agree-tos \
-                --non-interactive \
-                --key-type ecdsa \
-                --elliptic-curve secp384r1 || {
-                error "$(get_string "install_nginx_node_cert_failed")"
-                exit 1
-            }
-            CERT_DOMAIN="$base_domain"
-            ;;
-        2)
-            if [[ -n "$LE_EMAIL" ]]; then
-                info "LE_EMAIL=$LE_EMAIL"
-            else
-                while true; do
-                    question "$(get_string "install_nginx_node_enter_email")"
-                    LE_EMAIL="$REPLY"
-                    if [[ -n "$LE_EMAIL" ]]; then break; fi
-                    warn "$(get_string "install_nginx_node_email_empty")"
-                done
-            fi
-
-            systemctl stop nginx 2>/dev/null || true
-
-            certbot certonly \
-                --standalone \
-                -d "$DOMAIN" \
-                --email "$LE_EMAIL" \
-                --agree-tos \
-                --non-interactive \
-                --key-type ecdsa \
-                --elliptic-curve secp384r1 || {
-                error "$(get_string "install_nginx_node_cert_failed")"
-                exit 1
-            }
-            CERT_DOMAIN="$DOMAIN"
-            ;;
-        3)
-            if [[ -n "$GCORE_API_KEY" ]]; then
-                info "GCORE_API_KEY=***"
-            else
-                while true; do
-                    question "$(get_string "install_nginx_node_enter_gcore_token")"
-                    GCORE_API_KEY="$REPLY"
-                    if [[ -n "$GCORE_API_KEY" ]]; then break; fi
-                    warn "$(get_string "install_nginx_node_token_empty")"
-                done
-            fi
-            if [[ -n "$LE_EMAIL" ]]; then
-                info "LE_EMAIL=$LE_EMAIL"
-            else
-                while true; do
-                    question "$(get_string "install_nginx_node_enter_email")"
-                    LE_EMAIL="$REPLY"
-                    if [[ -n "$LE_EMAIL" ]]; then break; fi
-                    warn "$(get_string "install_nginx_node_email_empty")"
-                done
-            fi
-
-            if ! certbot plugins 2>/dev/null | grep -q "dns-gcore"; then
-                info "$(get_string "install_nginx_node_installing_gcore_plugin")"
-                apt-get install -y python3-pip >/dev/null 2>&1
-                if python3 -m pip install --help 2>&1 | grep -q "break-system-packages"; then
-                    python3 -m pip install --break-system-packages certbot-dns-gcore
-                else
-                    python3 -m pip install certbot-dns-gcore
-                fi
-
-                if ! certbot plugins 2>/dev/null | grep -q "dns-gcore"; then
-                    error "$(get_string "install_nginx_node_gcore_plugin_failed")"
-                    exit 1
-                fi
-                success "$(get_string "install_nginx_node_gcore_plugin_installed")"
-            else
-                info "$(get_string "install_nginx_node_gcore_plugin_exists")"
-            fi
-
-            mkdir -p ~/.secrets/certbot
-            cat > ~/.secrets/certbot/gcore.ini <<EOL
-dns_gcore_apitoken = $GCORE_API_KEY
-EOL
-            chmod 600 ~/.secrets/certbot/gcore.ini
-
-            certbot certonly \
-                --authenticator dns-gcore \
-                --dns-gcore-credentials ~/.secrets/certbot/gcore.ini \
-                --dns-gcore-propagation-seconds 80 \
-                -d "$base_domain" \
-                -d "$wildcard_domain" \
-                --email "$LE_EMAIL" \
-                --agree-tos \
-                --non-interactive \
-                --key-type ecdsa \
-                --elliptic-curve secp384r1 || {
-                error "$(get_string "install_nginx_node_cert_failed")"
-                exit 1
-            }
-            CERT_DOMAIN="$base_domain"
-            ;;
-    esac
-
-    success "$(get_string "install_nginx_node_cert_obtained")"
-
-    if ! crontab -u root -l 2>/dev/null | grep -q "/usr/bin/certbot renew"; then
-        local cron_command
-        if [ "$CERT_METHOD" == "2" ]; then
-            cron_command="systemctl stop nginx && /usr/bin/certbot renew --quiet && systemctl start nginx"
-        else
-            cron_command="/usr/bin/certbot renew --quiet && systemctl reload nginx"
-        fi
-        (crontab -u root -l 2>/dev/null; echo "0 5 * * 0 $cron_command") | crontab -u root -
-    fi
-
-    cp "/opt/remnasetup/data/nginx/nginx-node.conf" /etc/nginx/nginx.conf
-
-    rm -f /etc/nginx/conf.d/default.conf
-    rm -f /etc/nginx/sites-enabled/default
-
-    if [[ "$USE_PROXY_PROTOCOL" == "y" || "$USE_PROXY_PROTOCOL" == "Y" ]]; then
-        cp "/opt/remnasetup/data/nginx/selfsteal-proxy-protocol.conf" /etc/nginx/conf.d/selfsteal.conf
-    else
-        cp "/opt/remnasetup/data/nginx/selfsteal.conf" /etc/nginx/conf.d/selfsteal.conf
-    fi
-
-    sed -i "s|\$DOMAIN|$DOMAIN|g" /etc/nginx/conf.d/selfsteal.conf
-    sed -i "s|\$MONITOR_PORT|$MONITOR_PORT|g" /etc/nginx/conf.d/selfsteal.conf
-
-    if [[ -n "$CERT_DOMAIN" && "$CERT_DOMAIN" != "$DOMAIN" ]]; then
-        sed -i "s|/etc/letsencrypt/live/$DOMAIN|/etc/letsencrypt/live/$CERT_DOMAIN|g" /etc/nginx/conf.d/selfsteal.conf
-    fi
-
-    nginx -t || {
-        error "$(get_string "install_nginx_node_config_test_failed")"
-        exit 1
-    }
-
-    systemctl restart nginx
-    systemctl enable nginx
-    success "$(get_string "install_full_node_nginx_installed_success")"
-}
-
 install_remnanode() {
     info "$(get_string "install_full_node_installing_remnanode")"
     mkdir -p /opt/remnanode
@@ -766,6 +445,7 @@ install_remnanode() {
 
     info "$(get_string "install_full_node_using_standard_compose")"
     cp "/opt/remnasetup/data/docker/node-compose.yml" docker-compose.yml
+    install -d -m 700 /opt/remnanode/hy2-certs
 
     sed -i "s|\$NODE_PORT|$NODE_PORT|g" docker-compose.yml
     sed -i "s|\$SECRET_KEY|$SECRET_KEY|g" docker-compose.yml
@@ -825,12 +505,6 @@ main() {
                 systemctl disable nginx 2>/dev/null || true
             fi
             install_caddy
-        elif [[ "$WEBSERVER" == "nginx" && "$SKIP_NGINX" != "true" ]]; then
-            if [[ "$UPDATE_NGINX" == "true" ]]; then
-                systemctl stop nginx 2>/dev/null || true
-                rm -f /etc/nginx/conf.d/selfsteal.conf
-            fi
-            install_nginx_selfsteal
         fi
     fi
 
@@ -848,16 +522,14 @@ main() {
     
     success "$(get_string "install_full_node_complete")"
 
-    if [[ "$WEBSERVER" == "nginx" && "$SKIP_WEBSERVER" != "true" ]]; then
-        echo ""
-        if [[ "$USE_PROXY_PROTOCOL" == "y" || "$USE_PROXY_PROTOCOL" == "Y" ]]; then
-            echo -e "${BOLD_CYAN}Xray Reality config:${RESET}"
-            echo -e "${BLUE}  \"target\": \"127.0.0.1:$MONITOR_PORT\",${RESET}"
-            echo -e "${BLUE}  \"xver\": 1${RESET}"
-        else
-            echo -e "${BOLD_CYAN}Xray Reality config:${RESET}"
-            echo -e "${BLUE}  \"target\": \"127.0.0.1:$MONITOR_PORT\",${RESET}"
-            echo -e "${BLUE}  \"xver\": 0${RESET}"
+    # Расписание обслуживания: обновление ноды по своему дню + плановая перезагрузка
+    if [[ "$SKIP_REMNANODE" != "true" ]]; then
+        if [[ -n "$UPDATE_DAY" || -n "$REBOOT_MODE" ]] || ! is_non_interactive; then
+            local ans="${SETUP_MAINTENANCE:-}"
+            if [[ -z "$ans" ]]; then
+                if is_non_interactive; then ans=y; else question "$(get_string_local "ask_maint")"; ans="${REPLY:-y}"; fi
+            fi
+            [[ "$ans" =~ ^[Yy] ]] && bash /opt/remnasetup/scripts/remnanode/maintenance.sh
         fi
     fi
 

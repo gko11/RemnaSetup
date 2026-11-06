@@ -39,11 +39,13 @@ curl -fsSL https://raw.githubusercontent.com/gko11/RemnaSetup/refs/heads/main/in
 - Бэкап и восстановление (ручной, автоматический, с отправкой в Telegram или S3-хранилище)
 
 ### Remnanode (нода)
-- Полная установка (Remnanode + Caddy/Nginx + BBR + WARP)
-- Веб-сервер на выбор: **Caddy** или **Nginx** с self-steal
-- Nginx: поддержка proxy protocol, сертификаты через Cloudflare DNS-01 / HTTP-01 / Gcore DNS-01
+- Полная установка (Remnanode + Selfsteal на Docker + Caddy + BBR + WARP)
 - Управление IPv6
 - WARP SOCKS5 прокси (Docker) — регистрация через wgcf ≥ 2.3.0, без перерегистраций, готовый роутинг TikTok → WARP
+- **Обновление ноды без лишнего перезапуска**: нет новой версии — контейнер не трогается; новая не запустилась — автоматический откат
+- **Расписание обслуживания**: свой день обновления для каждого сервера и плановая перезагрузка, время по Москве (таймеры systemd)
+- **Hysteria2**: сертификат берётся у Caddy (или Caddy получает его сам), проброс в контейнер ноды, ежедневная синхронизация, UDP 443
+- BBR оптимизация (через /etc/sysctl.d, без дублей)
 - BBR оптимизация
 
 ---
@@ -60,23 +62,6 @@ MONITOR_PORT=8443 \
 NODE_PORT=3001 \
 SECRET_KEY='ваш_ключ' \
 WEBSERVER=caddy \
-INSTALL_WARP=y \
-BBR_ANSWER=y \
-sudo -E bash /opt/remnasetup/remnasetup.sh install-node
-```
-
-### Полная установка ноды с Nginx
-
-```bash
-DOMAIN=node.example.com \
-MONITOR_PORT=8443 \
-NODE_PORT=3001 \
-SECRET_KEY='ваш_ключ' \
-WEBSERVER=nginx \
-USE_PROXY_PROTOCOL=n \
-CERT_METHOD=1 \
-CF_API_KEY='токен' \
-CF_EMAIL='email@example.com' \
 INSTALL_WARP=y \
 BBR_ANSWER=y \
 sudo -E bash /opt/remnasetup/remnasetup.sh install-node
@@ -101,10 +86,11 @@ sudo -E bash /opt/remnasetup/remnasetup.sh install-node
 | `install-node` | Полная установка ноды |
 | `install-node-only` | Только Remnanode |
 | `install-caddy-node` | Только Caddy |
-| `install-nginx-node` | Только Nginx |
 | `install-bbr` | Только BBR |
 | `install-warp` | Только WARP SOCKS5 (Docker) |
-| `update-node` | Обновить Remnanode |
+| `update-node` | Обновить Remnanode (без перезапуска, если новой версии нет; откат, если новая не поднялась) |
+| `maintenance` | Расписание: день обновления + перезагрузка |
+| `install-hy2` | Hysteria2: сертификат из Caddy + подготовка ноды |
 
 ### Переменные окружения
 
@@ -114,13 +100,6 @@ sudo -E bash /opt/remnasetup/remnasetup.sh install-node
 | `MONITOR_PORT` | Порт веб-сервера | `8443` |
 | `NODE_PORT` | Порт ноды | `3001` |
 | `SECRET_KEY` | Ключ подключения к панели | — |
-| `WEBSERVER` | `caddy` или `nginx` | — |
-| `USE_PROXY_PROTOCOL` | `y` / `n` (для nginx) | — |
-| `CERT_METHOD` | `1` (Cloudflare) / `2` (HTTP-01) / `3` (Gcore) | — |
-| `CF_API_KEY` | Cloudflare API токен (cert_method=1) | — |
-| `CF_EMAIL` | Cloudflare email (cert_method=1) | — |
-| `LE_EMAIL` | Email для сертификата (cert_method=2/3) | — |
-| `GCORE_API_KEY` | Gcore API токен (cert_method=3) | — |
 | `INSTALL_WARP` | `y` / `n` | — |
 | `BBR_ANSWER` | `y` / `n` | — |
 | `SKIP_WEBSERVER` | `true` — пропустить веб-сервер | — |
@@ -134,7 +113,16 @@ sudo -E bash /opt/remnasetup/remnasetup.sh install-node
 | `SKIP_BBR` | `true` — пропустить BBR | — |
 | `UPDATE_REMNANODE` | `true` — переустановить ноду | — |
 | `UPDATE_CADDY` | `true` — переустановить Caddy | — |
-| `UPDATE_NGINX` | `true` — переустановить Nginx | — |
+| `UPDATE_DAY` | день обновления ноды `1`–`7` (Пн–Вс) или `off` | из старого crontab / `3` |
+| `UPDATE_TIME` | время обновления, ЧЧ:ММ по `MAINT_TZ` | `01:00` |
+| `REBOOT_MODE` | `daily` / `weekly` / `off` | `daily` |
+| `REBOOT_DAY` / `REBOOT_TIME` | день (для `weekly`) и время перезагрузки | `03:00` |
+| `MAINT_TZ` | часовой пояс расписания | `Europe/Moscow` |
+| `TG_TOKEN` / `TG_CHAT` / `NODE_NAME` | алерт в Telegram, если нода не поднялась после обновления | — |
+| `REMOVE_OLD_CRON` | `y` / `n` — убрать старые строки crontab с обновлением/перезагрузкой | `y` |
+| `SETUP_MAINTENANCE` | `y` / `n` — настроить расписание в конце полной установки | `y` |
+| `HY2_DOMAIN` | домен для Hysteria2 | домен selfsteal |
+| `HY2_ISSUE` / `HY2_RECREATE` / `HY2_UFW` | `y`/`n`: выпуск через Caddy, пересоздание контейнера, открыть 443/udp | `y` |
 | `LANGUAGE` | `ru` / `en` | `ru` |
 
 Без аргументов скрипт работает в обычном интерактивном режиме через меню.

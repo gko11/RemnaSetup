@@ -47,15 +47,15 @@ print_header() {
     if [ "$LANGUAGE" = "en" ]; then
         echo -e "${GREEN}RemnaSetup by gko11${RESET}"
         echo -e "${CYAN}Project: https://github.com/gko11/RemnaSetup${RESET}"
-        echo -e "${YELLOW}Selfsteal: Docker + Caddy   |   WARP: Docker SOCKS5${RESET}"
-        echo -e "${CYAN}Version: 2.6-gko11${RESET}"
+        echo -e "${YELLOW}Selfsteal: Docker + Caddy  |  WARP: Docker SOCKS5  |  Hysteria2${RESET}"
+        echo -e "${CYAN}Version: 2.7-gko11${RESET}"
         echo
         echo -e "${MAGENTA}────────────────────────────────────────────────────────────${RESET}"
     else
         echo -e "${GREEN}RemnaSetup by gko11${RESET}"
         echo -e "${CYAN}Проект: https://github.com/gko11/RemnaSetup${RESET}"
-        echo -e "${YELLOW}Selfsteal: Docker + Caddy   |   WARP: Docker SOCKS5${RESET}"
-        echo -e "${CYAN}Версия: 2.6-gko11${RESET}"
+        echo -e "${YELLOW}Selfsteal: Docker + Caddy  |  WARP: Docker SOCKS5  |  Hysteria2${RESET}"
+        echo -e "${CYAN}Версия: 2.7-gko11${RESET}"
         echo
         echo -e "${MAGENTA}────────────────────────────────────────────────────────────${RESET}"
     fi
@@ -96,27 +96,29 @@ display_remnanode_menu() {
     print_header
     menu "$(get_string "remnanode_menu")"
     if [ "$LANGUAGE" = "en" ]; then
-        echo -e "${BLUE}1. Full installation (Remnanode + Selfsteal/Nginx + BBR + WARP SOCKS5)${RESET}"
+        echo -e "${BLUE}1. Full installation (Remnanode + Selfsteal + BBR + WARP SOCKS5)${RESET}"
         echo -e "${BLUE}2. Install Remnanode only${RESET}"
         echo -e "${BLUE}3. Install Selfsteal only (Docker + Caddy)${RESET}"
-        echo -e "${BLUE}4. Install Nginx + self-steal only${RESET}"
-        echo -e "${BLUE}5. IPv6 Management${RESET}"
-        echo -e "${BLUE}6. Install BBR only${RESET}"
-        echo -e "${BLUE}7. Install WARP SOCKS5 proxy (Docker)${RESET}"
-        echo -e "${BLUE}8. Update Remnanode${RESET}"
-        echo -e "${BLUE}9. Apply resource limits to an existing node${RESET}"
-        echo -e "${BLUE}10. Back${RESET}"
+        echo -e "${BLUE}4. Install WARP SOCKS5 proxy (Docker)${RESET}"
+        echo -e "${BLUE}5. Install BBR only${RESET}"
+        echo -e "${BLUE}6. IPv6 Management${RESET}"
+        echo -e "${BLUE}7. Update Remnanode now (with check and rollback)${RESET}"
+        echo -e "${BLUE}8. Maintenance schedule (update day + reboot)${RESET}"
+        echo -e "${BLUE}9. Hysteria2: certificate and node preparation${RESET}"
+        echo -e "${BLUE}10. Apply resource limits to an existing node${RESET}"
+        echo -e "${RED}0. Back${RESET}"
     else
-        echo -e "${BLUE}1. Полная установка (Remnanode + Selfsteal/Nginx + BBR + WARP SOCKS5)${RESET}"
+        echo -e "${BLUE}1. Полная установка (Remnanode + Selfsteal + BBR + WARP SOCKS5)${RESET}"
         echo -e "${BLUE}2. Только Remnanode${RESET}"
         echo -e "${BLUE}3. Только Selfsteal (Docker + Caddy)${RESET}"
-        echo -e "${BLUE}4. Только Nginx + self-steal${RESET}"
-        echo -e "${BLUE}5. Управление IPv6${RESET}"
-        echo -e "${BLUE}6. Только BBR${RESET}"
-        echo -e "${BLUE}7. Установить WARP SOCKS5 прокси (Docker)${RESET}"
-        echo -e "${BLUE}8. Обновить Remnanode${RESET}"
-        echo -e "${BLUE}9. Выставить лимиты ресурсов на уже установленной ноде${RESET}"
-        echo -e "${BLUE}10. Назад${RESET}"
+        echo -e "${BLUE}4. WARP SOCKS5 прокси (Docker)${RESET}"
+        echo -e "${BLUE}5. Только BBR${RESET}"
+        echo -e "${BLUE}6. Управление IPv6${RESET}"
+        echo -e "${BLUE}7. Обновить Remnanode сейчас (с проверкой и откатом)${RESET}"
+        echo -e "${BLUE}8. Расписание обслуживания (день обновления + перезагрузка)${RESET}"
+        echo -e "${BLUE}9. Hysteria2: сертификат и подготовка ноды${RESET}"
+        echo -e "${BLUE}10. Выставить лимиты ресурсов на уже установленной ноде${RESET}"
+        echo -e "${RED}0. Назад${RESET}"
     fi
     echo
     read -p "$(echo -e "${BOLD_CYAN}$(get_string "select_option"):${RESET}") " REMNANODE_OPTION
@@ -193,8 +195,12 @@ handle_command() {
             run_script "${SCRIPT_DIR}/scripts/remnanode/install-caddy.sh"
             exit 0
             ;;
-        install-nginx-node)
-            run_script "${SCRIPT_DIR}/scripts/remnanode/install-nginx.sh"
+        maintenance)
+            run_script "${SCRIPT_DIR}/scripts/remnanode/maintenance.sh"
+            exit 0
+            ;;
+        install-hy2|hy2-cert)
+            run_script "${SCRIPT_DIR}/scripts/remnanode/install-hy2.sh"
             exit 0
             ;;
         install-bbr)
@@ -203,6 +209,7 @@ handle_command() {
             ;;
         apply-limits)
             run_script "${SCRIPT_DIR}/scripts/remnanode/apply-limits.sh"
+            exit 0
             ;;
         install-warp)
             run_script "${SCRIPT_DIR}/scripts/remnanode/install-warp.sh"
@@ -219,11 +226,12 @@ handle_command() {
             echo "  install-node         - Full node installation"
             echo "  install-node-only    - Install Remnanode only"
             echo "  install-selfsteal    - Install Selfsteal only (Docker + Caddy)"
-            echo "  install-nginx-node   - Install Nginx only"
             echo "  install-bbr          - Install BBR only"
             echo "  install-warp         - Install WARP SOCKS5 proxy (Docker)"
             echo "  apply-limits         - Apply memory limits + sysctl tuning to an existing node"
-            echo "  update-node          - Update Remnanode"
+            echo "  update-node          - Update Remnanode (no restart if no new version; rollback on failure)"
+            echo "  maintenance          - Maintenance schedule: update day + reboot (systemd timers, Moscow time)"
+            echo "  install-hy2          - Hysteria2: certificate from Caddy + node preparation"
             exit 1
             ;;
     esac
@@ -269,13 +277,14 @@ main() {
                         1) run_script "${SCRIPT_DIR}/scripts/remnanode/install-full.sh" ;;
                         2) run_script "${SCRIPT_DIR}/scripts/remnanode/install-node.sh" ;;
                         3) run_script "${SCRIPT_DIR}/scripts/remnanode/install-caddy.sh" ;;
-                        4) run_script "${SCRIPT_DIR}/scripts/remnanode/install-nginx.sh" ;;
-                        5) run_script "${SCRIPT_DIR}/scripts/remnanode/install-ipv6.sh" ;;
-                        6) run_script "${SCRIPT_DIR}/scripts/remnanode/install-bbr.sh" ;;
-                        7) run_script "${SCRIPT_DIR}/scripts/remnanode/install-warp.sh" ;;
-                        8) run_script "${SCRIPT_DIR}/scripts/remnanode/update.sh" ;;
-                        9) run_script "${SCRIPT_DIR}/scripts/remnanode/apply-limits.sh" ;;
-                        10) break ;;
+                        4) run_script "${SCRIPT_DIR}/scripts/remnanode/install-warp.sh" ;;
+                        5) run_script "${SCRIPT_DIR}/scripts/remnanode/install-bbr.sh" ;;
+                        6) run_script "${SCRIPT_DIR}/scripts/remnanode/install-ipv6.sh" ;;
+                        7) run_script "${SCRIPT_DIR}/scripts/remnanode/update.sh" ;;
+                        8) run_script "${SCRIPT_DIR}/scripts/remnanode/maintenance.sh" ;;
+                        9) run_script "${SCRIPT_DIR}/scripts/remnanode/install-hy2.sh" ;;
+                        10) run_script "${SCRIPT_DIR}/scripts/remnanode/apply-limits.sh" ;;
+                        0) break ;;
                         *) warn "$(get_string "invalid_choice")" ;;
                     esac
                 done

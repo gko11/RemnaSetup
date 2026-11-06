@@ -3,8 +3,9 @@
 English | [Русский](FORK.md)
 
 A fork of [Capybara-z/RemnaSetup](https://github.com/Capybara-z/RemnaSetup) with the
-selfsteal and WARP components replaced. Everything else (panel, subscription page,
-nginx, BBR, IPv6, backups) comes from the original.
+selfsteal and WARP components replaced, its own node maintenance and Hysteria2 support.
+Panel, subscription page, IPv6 and backups come from the original. The Nginx selfsteal
+option for nodes is removed (2.7): the build has a single path — Docker + Caddy.
 
 ## Installation
 
@@ -109,12 +110,80 @@ After installation a ready block for Remnawave (Config profiles) is printed and 
 Domains are listed explicitly, without `geosite:tiktok`: if the node's geosite.dat lacks
 that category, Xray does not start at all.
 
+### Node maintenance (2.7)
+
+Node menu → "Maintenance schedule", command `maintenance`.
+
+Replaces crontab lines
+
+```
+0 1 * * 3 cd /opt/remnanode && docker compose pull && docker compose down && docker compose up -d
+0 3 * * * /sbin/shutdown -r now
+```
+
+with systemd timers `remnanode-update.timer` and `remnasetup-reboot.timer`:
+
+- **The update day is chosen per server** (1–7), time is Moscow time regardless of
+  the server time zone (`OnCalendar=… Europe/Moscow`). Old crontab lines are found
+  automatically, their time is converted to Moscow time and offered as the default;
+  after confirmation they are removed (backup — `/root/crontab.backup.*`), other
+  crontab jobs are untouched.
+- **Reboot**: daily / weekly on its own day / off. Waits for a running update and is
+  skipped if the server has been up for less than 30 minutes (no reboot loop).
+- **Update (`remnanode-update`)** instead of `pull && down && up`: no new version —
+  the container is not restarted at all; a new one — `up -d` without `down`; then a
+  90 s check (container alive, not restarting, node port listening); unhealthy —
+  rollback to the previous image (`remnawave/node:rollback`). Old images are pruned.
+- Optional Telegram alert if the node fails after an update.
+- Log: `/var/log/remnasetup-maintenance.log` (monthly rotation),
+  `journalctl -u remnanode-update`, schedule — `systemctl list-timers`.
+- "Update Remnanode" in the menu and `update-node` use the same mechanism.
+
+Worker scripts are copied to `/usr/local/sbin` and do not depend on `/opt/remnasetup`
+(`install.sh` deletes and reinstalls it). Settings — `/etc/remnasetup/maintenance.env`.
+
+### Hysteria2 (2.7)
+
+Node menu → "Hysteria2: certificate and node preparation", command `install-hy2`.
+
+Hysteria2 (UDP 443) runs next to Reality (TCP 443) and, unlike Reality, presents the
+domain's TLS certificate itself. No new certificate is issued:
+
+1. A valid certificate for the domain is looked up — in the `*caddy_data` Docker volume
+   (selfsteal), system Caddy, certbot; a wildcard also works.
+2. If none and selfsteal is installed — Caddy obtains it: a site block for the domain is
+   added to the Caddyfile (HTTP-01 via the already published port 80). On failure the
+   Caddyfile is restored.
+3. A copy goes to `/opt/remnanode/hy2-certs/{fullchain,privkey}.pem`.
+4. The volume `/opt/remnanode/hy2-certs:/hy2-certs:ro` is added to the node compose
+   (new installs already have it in the template — no container recreation needed).
+5. `remnasetup-hy2-cert.timer` refreshes the copy daily (04:17 Moscow) after Caddy
+   renews. Xray re-reads the certificate file itself every hour — no node restart.
+6. 443/udp is opened in ufw; UDP 443 is checked for other listeners.
+7. What to put into the profile, node and host in the panel is printed.
+
+In the profile: `"certificates": [{"certificateFile": "/hy2-certs/fullchain.pem", "keyFile": "/hy2-certs/privkey.pem"}]`.
+
+### Small things (2.7)
+
+- BBR goes to `/etc/sysctl.d/60-bbr.conf` instead of being appended to `/etc/sysctl.conf`
+  (repeated runs created duplicates).
+- Removed: Nginx selfsteal for nodes (script, configs, branch in the full install), the
+  foreign `install_remnawave.sh` (eGamesAPI, never called), unused
+  `data/caddy/caddyfile-node`, ~220 unused translation strings.
+- The full install offers to set up the maintenance schedule at the end.
+
 ## What not to do
 
 - Do not delete `/opt/warproxy/config` — it holds the WARP account; without it a new
   registration is needed.
 - Do not run `docker compose down -v` in `/opt/selfsteal` — it wipes the certificates.
 - Do not publish 443 to Caddy if Xray sits on it.
+- Do not enable the Hysteria2 inbound on a node where `install-hy2` did not print
+  "READY": without the certificate Xray does not start and the whole node goes down
+  (Reality too).
+- Do not keep the old crontab lines together with the timers — the node would be
+  updated and rebooted twice.
 
 ## Variables for non-interactive mode
 

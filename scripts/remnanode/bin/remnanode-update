@@ -1,0 +1,103 @@
+#!/bin/bash
+#
+# remnanode-update — обновление Remnanode с проверкой и откатом.
+# Ставится в /usr/local/sbin, вызывается таймером remnanode-update.timer
+# или вручную. Самодостаточный: не зависит от /opt/remnasetup.
+#
+# Отличие от «pull && down && up»:
+#   - нет нового образа → контейнер НЕ перезапускается (люди не отваливаются);
+#   - новый образ → up -d без down (простой — секунды, а не полминуты);
+#   - после старта проверка: контейнер живёт и порт ноды слушается;
+#     если нет — откат на прежний образ и (по желанию) алерт в Telegram;
+#   - старые образы чистятся, диск не забивается.
+#
+# remnanode-update [--force]   --force: пересоздать контейнер даже без нового образа
+
+set -uo pipefail
+DIR=/opt/remnanode
+LOG=/var/log/remnasetup-maintenance.log
+CONF=/etc/remnasetup/maintenance.env
+LOCK=/run/remnasetup-maintenance.lock
+FORCE=0; [ "${1:-}" = "--force" ] && FORCE=1
+
+UI_LANG=ru; TG_TOKEN=""; TG_CHAT=""; NODE_NAME=""
+[ -f "$CONF" ] && . "$CONF"
+NODE_NAME=${NODE_NAME:-$(hostname -s)}
+
+m() { # m "русский" "english"
+    if [ "$UI_LANG" = "en" ]; then echo "$2"; else echo "$1"; fi
+}
+log() { echo "$(date '+%F %T') [update] $*" | tee -a "$LOG"; }
+tg() {
+    [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ] || return 0
+    curl -s -m 10 "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+        --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=$1" >/dev/null 2>&1 || true
+}
+
+exec 9>"$LOCK"
+if ! flock -n 9; then log "$(m 'другое обслуживание уже идёт — пропуск' 'other maintenance is running — skipped')"; exit 0; fi
+
+cd "$DIR" 2>/dev/null || { log "$(m "нет $DIR" "$DIR not found")"; exit 1; }
+SVC=$(docker compose config --services 2>/dev/null | head -1)
+IMG=$(docker compose config --images 2>/dev/null | head -1)
+[ -n "$SVC" ] && [ -n "$IMG" ] || { log "$(m 'не читается docker-compose.yml' 'cannot read docker-compose.yml')"; exit 1; }
+REPO=${IMG%:*}
+NODE_PORT=$(docker compose config 2>/dev/null | awk -F'[:=]' '/NODE_PORT/ {gsub(/[ "]/,"",$2); print $2; exit}')
+
+cid() { docker compose ps -q "$SVC" 2>/dev/null | head -1; }
+
+healthy() { # 90 секунд ждём: контейнер running, не перезапускается, порт ноды слушается
+    local i c st rc0 rc
+    c=$(cid); [ -n "$c" ] || return 1
+    rc0=$(docker inspect -f '{{.RestartCount}}' "$c" 2>/dev/null || echo 0)
+    for i in $(seq 1 30); do
+        sleep 3
+        st=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null)
+        rc=$(docker inspect -f '{{.RestartCount}}' "$c" 2>/dev/null || echo 0)
+        [ "$rc" -gt "$rc0" ] && return 1
+        [ "$st" = running ] || continue
+        if [ -z "$NODE_PORT" ] || ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${NODE_PORT}$"; then
+            sleep 10   # и ещё 10 секунд без падений
+            [ "$(docker inspect -f '{{.State.Status}} {{.RestartCount}}' "$c" 2>/dev/null)" = "running $rc" ] && return 0
+            return 1
+        fi
+    done
+    return 1
+}
+
+OLD_ID=$(docker inspect -f '{{.Image}}' "$(cid)" 2>/dev/null || true)
+log "$(m "проверяю обновление $IMG" "checking for $IMG update")"
+if ! docker compose pull -q "$SVC" >>"$LOG" 2>&1; then
+    log "$(m 'pull не удался (сеть/Docker Hub) — нода не тронута' 'pull failed (network/Docker Hub) — node untouched')"
+    exit 1
+fi
+NEW_ID=$(docker image inspect -f '{{.Id}}' "$IMG" 2>/dev/null)
+
+if [ "$OLD_ID" = "$NEW_ID" ] && [ $FORCE -eq 0 ] && [ "$(docker inspect -f '{{.State.Status}}' "$(cid)" 2>/dev/null)" = running ]; then
+    log "$(m 'новой версии нет — перезапуск не нужен' 'no new version — no restart needed')"
+    exit 0
+fi
+
+[ -n "$OLD_ID" ] && docker tag "$OLD_ID" "${REPO}:rollback" 2>/dev/null
+log "$(m 'новая версия — перезапускаю контейнер' 'new version — recreating container')"
+docker compose up -d "$SVC" >>"$LOG" 2>&1
+
+if healthy; then
+    log "$(m 'обновлено, нода работает' 'updated, node is healthy')"
+    docker image prune -f >/dev/null 2>&1
+    exit 0
+fi
+
+log "$(m 'после обновления нода не поднялась — откат' 'node unhealthy after update — rolling back')"
+if [ -n "$OLD_ID" ]; then
+    docker tag "${REPO}:rollback" "$IMG"
+    docker compose up -d --pull never "$SVC" >>"$LOG" 2>&1
+    if healthy; then
+        log "$(m 'откат выполнен, нода на прежней версии' 'rolled back, node on previous version')"
+        tg "⚠️ ${NODE_NAME}: $(m 'новая версия Remnanode не запустилась, выполнен откат на прежнюю' 'new Remnanode failed to start, rolled back')"
+        exit 2
+    fi
+fi
+log "$(m 'НОДА НЕ РАБОТАЕТ — нужна ручная проверка: docker compose -f /opt/remnanode/docker-compose.yml logs' 'NODE DOWN — check manually: docker compose -f /opt/remnanode/docker-compose.yml logs')"
+tg "🚨 ${NODE_NAME}: $(m 'Remnanode не работает после обновления, откат не помог' 'Remnanode down after update, rollback failed')"
+exit 3
